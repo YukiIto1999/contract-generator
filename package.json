@@ -30,7 +30,9 @@
     "prepare:native": "node scripts/prepare-native-fixtures.ts"
   },
   "dependencies": {
+    "@eslint-community/regexpp": "4.12.3",
     "lossless-json": "4.3.3",
+    "re2js": "2.10.0",
     "ts-results-es": "7.1.0"
   },
   "devDependencies": {

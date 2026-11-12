@@ -1,4 +1,7 @@
-import { createRequire } from "node:module";
+import * as results from "ts-results-es";
+import * as losslessJson from "lossless-json";
+import * as base from "@scure/base";
+import * as re2js from "re2js";
 import { runInThisContext } from "node:vm";
 import ts from "typescript";
 import type { ContractModel, EmissionOptions, GeneratedFile } from "../../model/contract-model.js";
@@ -34,6 +37,26 @@ const options: EmissionOptions = {
   rustCratePrefix: "sample",
 };
 
+/** Real external modules loaded before memory-only generated execution */
+const dependencies: Readonly<Record<string, LoadedModule>> = {
+  "ts-results-es": results,
+  "lossless-json": losslessJson,
+  "@scure/base": base,
+  re2js,
+};
+
+/**
+ * Eager dependency resolution without filesystem module loading
+ * @param name - External module specifier emitted by the generator
+ * @returns Already loaded real dependency
+ * @throws {@link Error} Undeclared generated dependency
+ */
+function dependency(name: string): LoadedModule {
+  const module = Object.hasOwn(dependencies, name) ? dependencies[name] : undefined;
+  if (module === undefined) throw new Error(`Unknown generated dependency ${name}`);
+  return module;
+}
+
 /**
  * Transpilation and execution of generated modules without touching the filesystem
  * @param files - Generated and support sources by module path
@@ -41,7 +64,6 @@ const options: EmissionOptions = {
  * @throws {@link Error} Generated source that does not transpile or execute
  */
 function execute(files: ReadonlyMap<string, string>): (name: string) => LoadedModule {
-  const nodeRequire = createRequire(import.meta.url);
   const loaded = new Map<string, LoadedModule>();
   const load = (name: string): LoadedModule => {
     const cached = loaded.get(name);
@@ -60,7 +82,7 @@ function execute(files: ReadonlyMap<string, string>): (name: string) => LoadedMo
     run(exports, (specifier) =>
       specifier.startsWith("./")
         ? load(specifier.slice(2).replace(/\.js$/, ""))
-        : nodeRequire(specifier),
+        : dependency(specifier),
     );
     return exports;
   };

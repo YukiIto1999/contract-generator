@@ -150,13 +150,13 @@ Run it with `check: true` in the verification entry of the consuming repository 
 
 ## Output
 
-| Path                                                               | Content                                                                                                 |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `typescript/contract.ts`                                           | Types, construction, and codecs that depend on `ts-results-es`, `lossless-json`, and `@scure/base` only |
-| `typescript/provider.ts`, `typescript/client.ts`                   | Handler interfaces with dispatch, and HTTP and IPC clients                                              |
-| `csharp/types/`, `csharp/provider/`, `csharp/client/`              | Three projects, of which the types project references TypeModeling only                                 |
-| `rust/types/`, `rust/transport/`, `rust/provider/`, `rust/client/` | Four crates, of which the types crate has no HTTP or async-runtime dependency                           |
-| `schemas/`, `http/openapi.json`, `docs/reference.md`               | Reference projections that are not complete validation schemas and are not inputs to generation         |
+| Path                                                               | Content                                                                                                                             |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript/contract.ts`                                           | Types, construction, and codecs using `ts-results-es`, `lossless-json`, `@scure/base`, and, only when patterns are present, `re2js` |
+| `typescript/provider.ts`, `typescript/client.ts`                   | Handler interfaces with dispatch, and HTTP and IPC clients                                                                          |
+| `csharp/types/`, `csharp/provider/`, `csharp/client/`              | Three projects, of which the types project references TypeModeling only                                                             |
+| `rust/types/`, `rust/transport/`, `rust/provider/`, `rust/client/` | Four crates, of which the types crate has no HTTP or async-runtime dependency                                                       |
+| `schemas/`, `http/openapi.json`, `docs/reference.md`               | Reference projections that are not complete validation schemas and are not inputs to generation                                     |
 
 The generated handler interface is the contract side of the connection.
 A hand-written adapter implements it and calls the application, so the application does not depend on generated code.
@@ -170,6 +170,11 @@ An unknown-member diagnostic names the containing object by its JSON pointer in 
 The generated code returns `Result` and `AsyncResult` from `ts-results-es` and does not define an effect type.
 The module named by `typescript-effect-module` exports `Effect<Env, E, A>`, callable as `(env, signal, deadlineAt) => AsyncResult<A, E>`, and `deferEffect`, which takes a function of that shape.
 `createFetchTransport` forwards the signal and adds no timer.
+
+Pattern-bearing generated modules require the consuming application's own direct runtime dependency `"re2js": "2.10.0"` in `package.json`.
+Do not rely on the generator's transitive installation: generation emits TypeScript source, not a consumer package manifest.
+Pattern-free modules import no RE2JS.
+The generator also uses RE2JS for pattern preflight and constant validation; `@eslint-community/regexpp` 4.12.3 is a generator-only parser dependency and is not imported by generated code.
 
 ### C#
 
@@ -228,20 +233,57 @@ Without that switch, native builds allow newer compatible compilers.
 
 The emitter reports each of these at the declaration and generates nothing.
 
-| Limit                                                                                   | Affected                                                                |
-| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `unixTimestamp` encoding                                                                | C#, Rust                                                                |
-| `@pattern`                                                                              | C#, and Rust for expressions without an equivalent in the `regex` crate |
-| `@preserveLexical` on a boolean or bytes scalar                                         | Rust                                                                    |
-| An HTTP method outside the nine standard methods                                        | Rust                                                                    |
-| A nullable parameter placed in the path, the query, or a header                         | All                                                                     |
-| A nullable raw binary body                                                              | All                                                                     |
-| Two distinct numbers beyond the binary64 range referenced through a `const` or an alias | All, because TypeSpec 1.17 does not expose their source spelling        |
+| Limit                                                                                   | Affected                                                            |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `unixTimestamp` encoding                                                                | C#, Rust                                                            |
+| `@pattern` outside the safe common profile below                                        | All, including Rust-only generation                                 |
+| `@pattern` within that profile                                                          | C# remains unsupported; Rust also requires an equivalent in `regex` |
+| `@preserveLexical` on a boolean or bytes scalar                                         | Rust                                                                |
+| An HTTP method outside the nine standard methods                                        | Rust                                                                |
+| A nullable parameter placed in the path, the query, or a header                         | All                                                                 |
+| A nullable raw binary body                                                              | All                                                                 |
+| Two distinct numbers beyond the binary64 range referenced through a `const` or an alias | All, because TypeSpec 1.17 does not expose their source spelling    |
 
 A top-level bytes request body is sent as raw bytes.
 To send bytes as JSON, put a bytes field inside an object body, such as `model Upload { data: bytes; }`; the body is JSON and the field uses its declared wire encoding.
 
 A nested number beyond the binary64 range inside `@providerDefault`, as in `#{n: 9007199254740993}`, stops the TypeSpec 1.17 compiler before the emitter runs.
+
+### Safe pattern profile
+
+`@pattern` is an optional capability with a closed subset of ECMAScript Unicode (`u`) semantics and no other flags.
+This restriction applies to the common authoring profile, not only to the TypeScript backend: a pattern that Rust could execute can still be rejected before Rust-only generation.
+C# continues to reject all patterns; Rust retains its additional target-specific restrictions.
+
+The profile admits Unicode scalar literals and escapes (including correctly paired surrogate escapes), concatenation, alternation including empty alternatives, ordinary/noncapturing/named groups, and greedy or lazy `?`, `*`, `+`, and counted quantifiers within the engine's compilation limits.
+Capture names and captures are erased because validation exposes only a boolean result.
+It also admits strict non-multiline `^` and `$`, dot, character classes and ranges, class unions and complements (including empty and negated-empty classes), and `\d`, `\D`, `\w`, `\W`, `\s`, `\S`.
+Dot excludes exactly LF, CR, U+2028, and U+2029; digits are ASCII `0–9`, and word characters are ASCII letters, digits, and underscore.
+Whitespace is exactly U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028–2029, U+202F, U+205F, U+3000, and U+FEFF; uppercase escapes complement the corresponding sets.
+There is no Unicode normalization or implicit full-string matching: source `a` matches `"ba"`, while `^a$` does not match `"a\n"`.
+
+Backreferences, all lookarounds, word-boundary assertions (`\b`, `\B` outside classes), Unicode property escapes, inline flag modifiers, isolated-surrogate literals, and any other unsupported syntax are rejected.
+Engine compilation limits also reject otherwise legal expressions such as `a{1001}` and `(a{40}){40}`; they are not input-length limits.
+Invalid syntax produces `invalid-pattern`; legal but unsupported patterns produce source-positioned `unsupported-pattern` issues.
+These blocking issues prevent publication of every selected output, before default normalization, default validation, or finite-domain evaluation.
+Direct TypeScript rendering also rejects ineligible patterns with `typescript-pattern`.
+
+Generated TypeScript uses synchronous RE2JS matching against the original string, compiling each distinct pattern source once per generated module and calling `.test`, not the full-match `.matches` API.
+Generator-owned default and literal/enum domain checks use the same safe executor; none of these paths executes authored patterns through native `RegExp` or falls back to it.
+For a fixed admitted pattern, this removes catastrophic backtracking, but does **not** bound total work across arbitrarily large input, many fields, or many patterns.
+Host request limits, scheduling, and resource budgets remain host responsibilities.
+This guarantee starts at the generator-owned profile/execution boundary.
+Before the emitter's preflight, TypeSpec 1.17.0's `@pattern` decorator constructs native `RegExp(pattern)` to check syntax and stores the original source; that decorator does not perform matching.
+Replacing generator-owned matching therefore does not remove frontend native regex parsing or establish an end-to-end resource bound for arbitrary hostile compiler input.
+
+After checking a value's kind, applicable codepoint-length and UUID checks may suppress the pattern check for that same value.
+Their violations remain, and siblings and independent fields continue to be checked; not every failing rule on one value is promised a separate violation.
+An executed pattern mismatch remains a `format` violation.
+The existing result algebra is unchanged: success carries the accepted value and unknown-member diagnostics; failure carries violations and no partially accepted value.
+
+The internal model and JSON Schema/OpenAPI projections retain the original ECMAScript source, not the translated RE2JS expression.
+External schema validators own their execution safety; the generated runtime's guarantee does not transfer to them.
+Verify browser and Tauri compatibility in the target environment with the generated consumer and its required dependencies installed.
 
 The IPC binding is a request and a response over a transport that the host supplies.
 Its fixtures include generic separate-process transports and a [real Tauri/Wry webview](./tests/fixtures/tauri/README.md) with generated TypeScript consumers and Rust provider dispatch.

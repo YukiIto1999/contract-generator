@@ -150,13 +150,13 @@ emitter は印を削除せず競合を報告し、復旧には所有者が残っ
 
 ## 出力
 
-| path                                                               | 内容                                                                                  |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `typescript/contract.ts`                                           | 型、構築、codec で、依存は `ts-results-es`、`lossless-json`、`@scure/base` だけである |
-| `typescript/provider.ts`、`typescript/client.ts`                   | handler の Interface と dispatch、HTTP と IPC の client                               |
-| `csharp/types/`、`csharp/provider/`、`csharp/client/`              | 三つの project で、types の project は TypeModeling だけを参照する                    |
-| `rust/types/`、`rust/transport/`、`rust/provider/`、`rust/client/` | 四つの crate で、types の crate は HTTP にも非同期 runtime にも依存しない             |
-| `schemas/`、`http/openapi.json`、`docs/reference.md`               | 参照用の投影で、完全な検証 schema でも生成の入力でもない                              |
+| path                                                               | 内容                                                                                                           |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `typescript/contract.ts`                                           | 型、構築、codec。`ts-results-es`、`lossless-json`、`@scure/base` と、pattern がある場合だけ `re2js` に依存する |
+| `typescript/provider.ts`、`typescript/client.ts`                   | handler の Interface と dispatch、HTTP と IPC の client                                                        |
+| `csharp/types/`、`csharp/provider/`、`csharp/client/`              | 三つの project で、types の project は TypeModeling だけを参照する                                             |
+| `rust/types/`、`rust/transport/`、`rust/provider/`、`rust/client/` | 四つの crate で、types の crate は HTTP にも非同期 runtime にも依存しない                                      |
+| `schemas/`、`http/openapi.json`、`docs/reference.md`               | 参照用の投影で、完全な検証 schema でも生成の入力でもない                                                       |
 
 生成する handler の Interface は、接続のうち契約側の口である。
 手書きの adapter がそれを実装して application を呼ぶので、application は生成コードに依存しない。
@@ -170,6 +170,13 @@ emitter は印を削除せず競合を報告し、復旧には所有者が残っ
 生成コードは `ts-results-es` の `Result` と `AsyncResult` を返し、effect の型を自分では定義しない。
 `typescript-effect-module` で指定した module は、`(env, signal, deadlineAt) => AsyncResult<A, E>` として呼べる `Effect<Env, E, A>` と、その形の関数を受け取る `deferEffect` を export する。
 `createFetchTransport` は signal を引き渡し、timer を足さない。
+
+pattern を含む生成 module を使う application は、自身の `package.json` に `"re2js": "2.10.0"` を直接の実行時依存として宣言する。
+生成器の推移的な依存の install に頼らない。
+生成するのは TypeScript の source であり、consumer の package manifest ではない。
+pattern のない module は RE2JS を import しない。
+生成器も pattern の事前検査と定数の検証に RE2JS を使う。
+`@eslint-community/regexpp` 4.12.3 は生成器だけが使う parser の依存であり、生成コードは import しない。
 
 ### C#
 
@@ -233,21 +240,66 @@ edition の下限は、その compiler での動作を確認した値ではな�
 
 次のものは、emitter が宣言の位置で報告し、何も生成しない。
 
-| 制限                                                                           | 対象                                             |
-| ------------------------------------------------------------------------------ | ------------------------------------------------ |
-| `unixTimestamp` の encoding                                                    | C#、Rust                                         |
-| `@pattern`                                                                     | C# と、`regex` crate に等価な表現がない式の Rust |
-| boolean か bytes の scalar に付けた `@preserveLexical`                         | Rust                                             |
-| 標準の九つの method 以外の HTTP method                                         | Rust                                             |
-| path・query・header に置いた nullable な引数                                   | 全言語                                           |
-| nullable な raw binary の body                                                 | 全言語                                           |
-| `const` か alias を経由して参照した、binary64 の範囲を越える相異なる二つの数値 | 全言語(TypeSpec 1.17 が元の綴りを公開しないため) |
+| 制限                                                                           | 対象                                                                |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `unixTimestamp` の encoding                                                    | C#、Rust                                                            |
+| 下記の安全な共通 profile に含まれない `@pattern`                               | Rust だけを生成する場合も含め、全言語                               |
+| 共通 profile 内の `@pattern`                                                   | C# は引き続き未対応。Rust は `regex` に等価な表現がある場合だけ対応 |
+| boolean か bytes の scalar に付けた `@preserveLexical`                         | Rust                                                                |
+| 標準の九つの method 以外の HTTP method                                         | Rust                                                                |
+| path・query・header に置いた nullable な引数                                   | 全言語                                                              |
+| nullable な raw binary の body                                                 | 全言語                                                              |
+| `const` か alias を経由して参照した、binary64 の範囲を越える相異なる二つの数値 | 全言語(TypeSpec 1.17 が元の綴りを公開しないため)                    |
 
 要求 body 自体が bytes の場合は、bytes のまま送る。
 JSON で運ぶ場合は、`model Upload { data: bytes; }` のように object の field に bytes を置く。
 body は JSON になり、その field は宣言した wire encoding に従う。
 
 `@providerDefault` の中で入れ子にした binary64 の範囲を越える数値(`#{n: 9007199254740993}` など)は、emitter が動く前に TypeSpec 1.17 の compiler を停止させる。
+
+### 安全な pattern の profile
+
+`@pattern` は任意の機能であり、ECMAScript の Unicode (`u`) の意味を持つ、明示した部分集合だけに対応する。
+他の flag は使わない。
+この制限は TypeScript の生成部だけでなく、共通の記述 profile 全体に適用する。
+Rust の engine で実行できる式でも、Rust だけを生成する前に拒否されることがある。
+C# は引き続き全 pattern を拒否し、Rust には生成先固有の追加制限が残る。
+
+対応するのは、Unicode scalar の literal と escape（正しく対になった surrogate escape を含む）、連結、空の選択肢を含む選択、通常・非捕捉・名前付きの group、および engine の compile 制限内の貪欲・非貪欲な `?`、`*`、`+`、回数指定である。
+検証結果は真偽値だけなので、捕捉と捕捉名は除去する。
+非 multiline の厳密な `^` と `$`、dot、文字 class と範囲、class の和集合と補集合（空 class とその否定を含む）、`\d`、`\D`、`\w`、`\W`、`\s`、`\S` にも対応する。
+dot が除くのは LF、CR、U+2028、U+2029 だけであり、数字は ASCII の `0–9`、word 文字は ASCII の英字・数字・underscore である。
+空白の集合は U+0009–000D、U+0020、U+00A0、U+1680、U+2000–200A、U+2028–2029、U+202F、U+205F、U+3000、U+FEFF に限り、大文字の escape は対応する集合の補集合を表す。
+Unicode 正規化や暗黙の全文一致は行わない。
+式 `a` は `"ba"` に一致し、`^a$` は `"a\n"` に一致しない。
+
+後方参照、全ての先読み・後読み、文字 class 外の単語境界 assertion (`\b`、`\B`)、Unicode property escape、inline flag、孤立 surrogate の literal、および他の未対応構文は拒否する。
+engine の compile 制限により、構文上は正しい `a{1001}` や `(a{40}){40}` も拒否する。
+この制限は入力文字列の長さ制限ではない。
+不正な構文は `invalid-pattern`、正しい構文でも未対応の式は宣言位置付きの `unsupported-pattern` となる。
+これらは既定値の正規化・検証や有限値域の評価より前に判定し、選択した全出力の公開を止める。
+TypeScript の直接 render も、同じ適格性検査に失敗した式を `typescript-pattern` として拒否する。
+
+生成 TypeScript は元の文字列を同期的に RE2JS で照合する。
+異なる pattern source ごとに生成 module 内で一度 compile し、全文一致の `.matches` ではなく `.test` を呼ぶ。
+生成器が所有する既定値と literal・enum の値域検査も同じ安全な実行器を使い、いずれも契約に書かれた式を native `RegExp` で実行せず、そこへ fallback しない。
+受理した固定の式に対する破局的なバックトラッキングを除く保証であり、任意に長い入力、多数の field、多数の式に対する総作業量の上限を保証するものではない。
+要求サイズの制限、scheduling、resource budget は host が所有する。
+保証の境界は生成器が所有する profile と実行経路から始まる。
+emitter の事前検査より前に、TypeSpec 1.17.0 の `@pattern` decorator は native `RegExp(pattern)` を構築して構文を調べ、元の source を保存する。
+この decorator 自体は照合しない。
+生成器が所有する照合を置き換えても、frontend の native 正規表現の parse はなくならず、任意の悪意ある compiler 入力に対する処理全体の resource 上限を保証するものではない。
+
+値の種類を調べた後、その値の code point 長や UUID の検査に違反があれば、同じ値の pattern 検査を省ける。
+その違反は残し、兄弟項目と独立した field の検証は続ける。
+一つの値で失敗する全規則を列挙する保証はない。
+pattern を実行して不一致だった場合は、引き続き `format` 違反となる。
+結果の形は変えない。
+成功は受理した値と未知項目の診断、失敗は違反を持ち、部分的に受理した値を返さない。
+
+内部モデルと JSON Schema・OpenAPI の投影には、翻訳後の RE2JS の式ではなく元の ECMAScript source を残す。
+外部 schema validator の実行安全性はその利用側が所有し、生成 runtime の保証は引き継がれない。
+browser や Tauri の互換性は、生成物と必要な依存を組み込んだ対象環境で確かめる。
 
 IPC の binding は、host が供給する transport の上の要求と応答である。
 fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。

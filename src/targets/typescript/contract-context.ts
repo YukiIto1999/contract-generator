@@ -43,6 +43,10 @@ export interface ContractContext {
   readonly bindingTypes: ReadonlySet<string>;
   /** Module-level constant declarations in emission order */
   readonly constants: string[];
+  /** Private compiled constant name for each original pattern */
+  readonly patterns: Map<string, string>;
+  /** Collision-free private name of the optional engine import */
+  readonly patternEngine: string;
   /** Use-site readers in registration order */
   readonly uses: UseEntry[];
   /** Registered use-site reader names by reference identity */
@@ -152,6 +156,8 @@ export function createContext(model: ContractModel): ContractContext {
     ),
     bindingTypes: reaching(types, (type) => type.kind === "scalar" && scalarEncodes(type.scalar)),
     constants: [],
+    patterns: new Map(),
+    patternEngine: names.claim("PatternEngine"),
     uses: [],
     useNames: new Map(),
   };

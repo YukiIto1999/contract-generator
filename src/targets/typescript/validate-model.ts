@@ -1,4 +1,3 @@
-import { Result } from "ts-results-es";
 import type {
   Constraints,
   ContractModel,
@@ -8,6 +7,7 @@ import type {
   Origin,
 } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
+import { preparePattern } from "../../model/patterns/compiled-pattern.js";
 import { inputOf } from "./operation-plan.js";
 
 /** Declaration position carrying value restrictions */
@@ -83,36 +83,23 @@ function restrictionSites(
 }
 
 /**
- * Compilation outcome of a declared pattern
- * @param pattern - ECMAScript pattern source
- * @returns Whether the pattern is a valid Unicode regular expression
- * @throws {@link Error} Failure that is not a pattern syntax error
- */
-function isUnicodePattern(pattern: string): boolean {
-  return Result.wrap<RegExp, unknown>(() => new RegExp(pattern, "u"))
-    .mapErr((cause) => {
-      if (cause instanceof SyntaxError) return cause;
-      throw cause;
-    })
-    .isOk();
-}
-
-/**
- * Declared patterns that are not ECMAScript Unicode regular expressions
+ * Declared patterns outside the common safe Unicode execution profile
  * @param sites - Restriction sites
  * @returns One source-addressed issue per invalid pattern
  */
 function patternIssues(sites: readonly RestrictionSite[]): GenerationIssue[] {
   return sites.flatMap((site): GenerationIssue[] => {
     const { pattern } = site.constraints;
-    if (pattern === undefined || isUnicodePattern(pattern)) return [];
+    if (pattern === undefined) return [];
+    const prepared = preparePattern(pattern);
+    if (prepared.isOk()) return [];
     return [
       {
         code: "typescript-pattern",
         target: "typescript",
         origin: site.origin,
         subject: site.subject,
-        reason: "The declared pattern is not a valid ECMAScript Unicode regular expression",
+        reason: prepared.error.reason,
       },
     ];
   });

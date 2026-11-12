@@ -16,6 +16,9 @@ export function renderContract(model: ContractModel): string {
   const operations = context.operations.map((operation) => operationSource(context, operation));
   const uses = context.uses.map((entry) => useReaderSource(context, entry));
   return [
+    ...(context.patterns.size === 0
+      ? []
+      : [`import { RE2JS as ${context.patternEngine} } from "re2js";`]),
     runtimeSource,
     context.constants.join("\n\n"),
     types.map((type) => type.declaration).join("\n\n"),

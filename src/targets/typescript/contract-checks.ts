@@ -1,4 +1,5 @@
 import type { Bound, Constraints } from "../../model/contract-model.js";
+import { preparePattern } from "../../model/patterns/compiled-pattern.js";
 import { declareConstant, type ContractContext } from "./contract-context.js";
 import { camel, quote } from "./source-text.js";
 
@@ -42,6 +43,8 @@ export function textChecks(
   subject: CheckSubject,
 ): string[] {
   const statements: string[] = [];
+  if (constraints.pattern !== undefined)
+    statements.push("{", "const patternStart = state.violations.length;");
   const reject = (rule: string): string => `invalid(state, path, ${quote(rule)});`;
   if (constraints.minLength !== undefined)
     statements.push(
@@ -58,15 +61,35 @@ export function textChecks(
   if (constraints.format === "uuid")
     statements.push(`if (!isUuid(${subject.text})) ${reject("format")}`);
   if (constraints.pattern !== undefined) {
-    const pattern = declareConstant(
-      context,
-      `${camel(owner)}Pattern`,
-      `Declared pattern of ${owner}`,
-      `new RegExp(${quote(constraints.pattern)}, "u")`,
+    const pattern = patternConstant(context, owner, constraints.pattern);
+    statements.push(
+      `if (state.violations.length === patternStart && !${pattern}.test(${subject.text})) ${reject("format")}`,
+      "}",
     );
-    statements.push(`if (!${pattern}.test(${subject.text})) ${reject("format")}`);
   }
   return statements;
+}
+
+/**
+ * One private compiled constant per original pattern in this module
+ * @param context - Generation state
+ * @param owner - Readable declaration stem
+ * @param source - Preflighted original pattern
+ * @returns Private matcher name
+ * @throws {@link Error} Pattern escaping generation preflight
+ */
+function patternConstant(context: ContractContext, owner: string, source: string): string {
+  const previous = context.patterns.get(source);
+  if (previous !== undefined) return previous;
+  const prepared = preparePattern(source).unwrap();
+  const name = declareConstant(
+    context,
+    `${camel(owner)}Pattern`,
+    `Declared pattern of ${owner}`,
+    `${context.patternEngine}.compile(${quote(prepared.source)})`,
+  );
+  context.patterns.set(source, name);
+  return name;
 }
 
 /**
