@@ -92,6 +92,10 @@ transportの実装、接続先、認証、再試行と時間上限の方針はho
 型とcodecだけの利用には、HTTP client、Effect runtime、接続設定を要求しない。
 Result、Effect、JSON parser、HTTP clientをこのライブラリ内で再実装しない。
 C#は互換性を確認したTypeModelingとEffectSystem、TypeScriptはts-results-esと利用側が所有するEffectの入口、Rustは標準のResultと非同期実行基盤へ接続する。
+Rust の最低サポート版は `src/targets/rust/dependencies.ts` の `rustMinimumVersion` を正本とする。
+生成 manifest と利用手順は同じ値を参照し、最低版の受入は、既存の Rust native の検証群を `RUST_CONTRACT_EXACT_MINIMUM=1` で一度だけ実行して行う。
+この指定では rustc と Cargo が最低版そのものでなければ検証群が失敗し、全依存単位の build と公開 codec・構築の実行は同じ検証群が担うので別の検査で繰り返さない。
+通常の native build は最低版以上の互換性のある compiler を許し、固定した版を最新 stable へ自動追随する宣言とは扱わない。
 
 ## 生成時の拒否
 
@@ -125,6 +129,8 @@ C#は互換性を確認したTypeModelingとEffectSystem、TypeScriptはts-resul
 | G16 | 別processから同じ出力への生成・drift検査、更新中断、親directoryのalias                                                                | 同時更新を競合として拒否し、出力と残存した所有を保ち、drift検査は書き込まない                                                      | 進行中の退避の誤復旧と二重更新                                                       |
 | G17 | C#のconsumerが実行関数を持たないEffectをdefaultで返す                                                                                 | 依存側analyzerのEFFSYS008によってcompileに失敗する                                                                                 | runtime参照だけで利用規則の検査も伝播するとみなす設定                                |
 | G21 | 全ての行末文字、XMLで許されない制御文字、双方向制御文字、escapeに見える字句、引用符、コードブロックを含む説明文・項目名・tag・literal | 三言語の生成物をbuildまたは型検査でき、説明は文書の文字として残り、literalは宣言した値だけを受理し、説明に含めたcodeは実行されない | 行末文字・制御文字による文書外へのcodeの混入、literalの字句の化け、説明のdoctest実行 |
+| G18 | 最低サポート版と同じ rustc・Cargo で三つの固定契約を生成する                                                                          | 全 Rust 依存単位を build し、公開構築・codec の受理と拒否を実行できる                                                              | 宣言した最低版を別の compiler で検証したとみなす判定                                 |
+| G19 | Linux の実 Wry webview から Tauri command を通して生成済みの両端を呼ぶ                                                                | 成功・宣言した拒否・不正入力の拒否と状態不変・準備前と停止後の拒否・進行中の取消後の回収を観測し、実 event loop を正常終了する     | mock Runtime や frame の往復だけを実 Tauri の接続とみなす判定                        |
 
 PBTはこの実装の不変条件の検証に用いる。
 業務oracleの生成、MBTと形式手法の体系化はこのライブラリの責務に含めない。

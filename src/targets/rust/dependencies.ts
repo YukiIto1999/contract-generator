@@ -1,5 +1,8 @@
 import type { GeneratedFile } from "../../model/contract-model.js";
 
+/** Supported compiler floor exercised by the pinned native acceptance environment */
+export const rustMinimumVersion = "1.94.0";
+
 /** Exact direct dependencies of generated Rust crates */
 export const rustDependencies = {
   serde: "1.0.229",
@@ -40,7 +43,7 @@ missing_docs_in_private_items = "deny"
  * @returns Standalone crate manifest; its doctests are off, because a fenced block in a contract description would otherwise compile and run under `cargo test`
  */
 function manifest(prefix: string, unit: string, dependencies: string): string {
-  return `[package]\nname = "${prefix}-${unit}"\nversion = "0.1.0"\nedition = "2024"\nrust-version = "1.85"\npublish = false\n\n[lints]\nworkspace = true\n\n[lib]\ndoctest = false\n\n[dependencies]\n${dependencies}\n`;
+  return `[package]\nname = "${prefix}-${unit}"\nversion = "0.1.0"\nedition = "2024"\nrust-version = "${rustMinimumVersion}"\npublish = false\n\n[lints]\nworkspace = true\n\n[lib]\ndoctest = false\n\n[dependencies]\n${dependencies}\n`;
 }
 
 /** Cargo workspace and package manifests of the four dependency units

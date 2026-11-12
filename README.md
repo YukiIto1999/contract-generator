@@ -212,7 +212,11 @@ This deadline representation does not yet satisfy the standard's `Deadline` inte
 The generated crates use the standard `Result` and futures, with `CancellationToken` from `tokio-util` for cancellation.
 The host owns the server: it passes each request to `dispatch_http` or `dispatch_ipc` and maps the returned `ProviderFailure` to its own response.
 A host that receives IPC text parses it with the generated `parse_json`, which keeps the spelling of numbers.
-The manifests carry the lints of the architecture standard and declare Rust 1.85, and the crates are built, linted with clippy, and tested with Rust 1.94.0.
+The manifests carry the lints of the architecture standard and require Rust 1.94.0 or a newer compatible compiler.
+The supported floor follows the pinned native acceptance toolchain, not the edition floor, which does not establish compiler support.
+The minimum-version proof is the existing native Rust collection run once with `RUST_CONTRACT_EXACT_MINIMUM=1`, which fails unless rustc and Cargo are exactly 1.94.0.
+That collection builds every generated dependency unit for the three fixed contracts and executes the public construction and codec observations.
+Without that switch, native builds allow newer compatible compilers.
 
 ## Limits
 
@@ -233,8 +237,9 @@ To send bytes as JSON, put a bytes field inside an object body, such as `model U
 
 A nested number beyond the binary64 range inside `@providerDefault`, as in `#{n: 9007199254740993}`, stops the TypeSpec 1.17 compiler before the emitter runs.
 
-The IPC binding is a request and a response over a transport that the host supplies, and it is tested across separate processes.
-It is not tested inside a Tauri application.
+The IPC binding is a request and a response over a transport that the host supplies.
+Its fixtures include generic separate-process transports and a [real Tauri/Wry webview](./tests/fixtures/tauri/README.md) with generated TypeScript consumers and Rust provider dispatch.
+That desktop fixture targets Linux with GTK3 and WebKitGTK 4.1; it is not a claim of acceptance on Windows, macOS, or mobile.
 
 ## Architecture standard
 

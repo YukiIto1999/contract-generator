@@ -216,7 +216,12 @@ EffectSystem `v0.2.0` には期限の型がないので、各操作は `DateTime
 生成する crate は、標準の `Result` と future を使い、取り消しには `tokio-util` の `CancellationToken` を使う。
 server は host が所有し、要求ごとに `dispatch_http` か `dispatch_ipc` を呼んで、返された `ProviderFailure` を自分の応答へ対応付ける。
 IPC の text を受け取る host は、数値の綴りを保つ生成済みの `parse_json` で parse する。
-manifest は architecture-standard の lint を持ち、Rust 1.85 を宣言し、build、clippy の lint、test は Rust 1.94.0 で行っている。
+manifest は architecture-standard の lint を持ち、Rust 1.94.0 以降の互換性のある compiler を要求する。
+サポートの下限は固定した native 受入環境に合わせている。
+edition の下限は、その compiler での動作を確認した値ではないため、サポートの下限にしない。
+最低版の証明は、既存の Rust native の検証群を `RUST_CONTRACT_EXACT_MINIMUM=1` で一度だけ実行することであり、rustc と Cargo の両方が 1.94.0 そのものでなければ失敗する。
+この検証群が、三つの固定契約の全依存単位を build し、公開した構築と codec の結果を観測する。
+この指定のない通常の native build は、より新しい互換性のある compiler も受け入れる。
 
 ## 制限
 
@@ -238,8 +243,9 @@ body は JSON になり、その field は宣言した wire encoding に従う�
 
 `@providerDefault` の中で入れ子にした binary64 の範囲を越える数値(`#{n: 9007199254740993}` など)は、emitter が動く前に TypeSpec 1.17 の compiler を停止させる。
 
-IPC の binding は、host が供給する transport の上の要求と応答であり、別 process の間で test している。
-Tauri の application の中では test していない。
+IPC の binding は、host が供給する transport の上の要求と応答である。
+fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。
+desktop fixture の対象は GTK3 と WebKitGTK 4.1 を使う Linux であり、Windows、macOS、mobile での受入を示すものではない。
 
 ## アーキテクチャの標準
 
