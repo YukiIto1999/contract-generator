@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { promisify } from "node:util";
 import type {
   ContractModel,
@@ -13,6 +14,7 @@ import { compileContract } from "../../../src/profile/compile-contract.js";
 import { $decorators, $lib } from "../../../src/profile/library.js";
 import { renderTypeScript } from "../../../src/targets/typescript/render-typescript.js";
 import { typescriptFixtureFiles } from "../../fixtures/typescript/materialize.js";
+import { hostileContract } from "./hostile-source.js";
 
 const run = promisify(execFile);
 
@@ -42,13 +44,18 @@ const roots: string[] = [];
 
 /**
  * Complete TypeSpec interpretation through the real frontend and the current profile implementation
- * @param source - Checkout-relative actual TypeSpec source file
+ * @param source - Checkout-relative TypeSpec source path, which also resolves the imports of an inline source text
  * @param namespace - Selected public contract
+ * @param text - Contract source text; the checkout file is read when omitted
  * @returns Normalized model
  */
-export async function modelFrom(source: string, namespace: string): Promise<ContractModel> {
+export async function modelFrom(
+  source: string,
+  namespace: string,
+  text?: string,
+): Promise<ContractModel> {
   const declarations = await readFile(new URL("../../../lib/main.tsp", import.meta.url), "utf8");
-  const contract = await readFile(new URL(`../../../${source}`, import.meta.url), "utf8");
+  const contract = text ?? (await readFile(new URL(`../../../${source}`, import.meta.url), "utf8"));
   const tester = createTester(projectRoot, { libraries: [] })
     .files({
       "lib/main.tsp": declarations,
@@ -110,20 +117,22 @@ export async function contractProject(): Promise<string> {
 }
 
 /**
- * Generated numeric contract project that type-checked
+ * Standalone generated project with its consumer program, type-checked by the real compiler
+ * @param prefix - Directory name stem below the checkout root
+ * @param files - Generated files that the project holds
+ * @param consumers - Fixture files copied beside them
  * @returns Project root directory
- * @throws {@link Error} Model that the target rejects
+ * @throws {@link Error} Sources that do not type-check
  */
-export async function numericProject(): Promise<string> {
-  const root = await mkdtemp(resolve(".typescript-numeric-"));
+async function standaloneProject(
+  prefix: string,
+  files: readonly GeneratedFile[],
+  consumers: readonly string[],
+): Promise<string> {
+  const root = await mkdtemp(resolve(prefix));
   roots.push(root);
-  const generated = renderTypeScript(
-    await modelFrom("tests/fixtures/typescript/numeric.tsp", "Numeric"),
-    options,
-  );
-  if (generated.isErr()) throw new Error(JSON.stringify(generated.error));
-  const assets: GeneratedFile[] = [...generated.value];
-  for (const name of ["effect.ts", "check.ts", "numeric-consumer.ts"])
+  const assets: GeneratedFile[] = [...files];
+  for (const name of consumers)
     assets.push({
       path: `typescript/${name}`,
       content: await readFile(
@@ -151,6 +160,72 @@ export async function numericProject(): Promise<string> {
   await materialize(root, assets);
   await typecheck(root, "tsconfig.json");
   return root;
+}
+
+/**
+ * Generated numeric contract project that type-checked
+ * @returns Project root directory
+ * @throws {@link Error} Model that the target rejects
+ */
+export async function numericProject(): Promise<string> {
+  const generated = renderTypeScript(
+    await modelFrom("tests/fixtures/typescript/numeric.tsp", "Numeric"),
+    options,
+  );
+  if (generated.isErr()) throw new Error(JSON.stringify(generated.error));
+  return standaloneProject(".typescript-numeric-", generated.value, [
+    "effect.ts",
+    "check.ts",
+    "numeric-consumer.ts",
+  ]);
+}
+
+/**
+ * Generated types and codecs of the hostile source-data contract that type-checked
+ * @returns Project root directory
+ * @throws {@link Error} Model that the target rejects
+ */
+export async function sourceDataProject(): Promise<string> {
+  const generated = renderTypeScript(
+    await modelFrom(
+      "tests/fixtures/typescript/source-data.tsp",
+      "SourceData",
+      hostileContract("../../../lib/main.tsp"),
+    ),
+    options,
+  );
+  if (generated.isErr()) throw new Error(JSON.stringify(generated.error));
+  return standaloneProject(
+    ".typescript-source-data-",
+    generated.value.filter((file) => file.path === "typescript/contract.ts"),
+    ["check.ts", "source-data-consumer.ts"],
+  );
+}
+
+/**
+ * Lines of every documentation comment of a generated contract module, as the TypeScript compiler scans the comments
+ * @param root - Generated project root
+ * @returns Comment lines without comment markers, each with whitespace collapsed
+ */
+export async function documentationLines(root: string): Promise<ReadonlySet<string>> {
+  const path = join(root, "typescript/contract.ts");
+  const source = await readFile(path, "utf8");
+  const lines = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    for (const range of ts.getLeadingCommentRanges(source, node.getFullStart()) ?? [])
+      if (range.kind === ts.SyntaxKind.MultiLineCommentTrivia)
+        for (const line of source.slice(range.pos, range.end).split(/\r\n?|\n/))
+          lines.add(
+            line
+              .replace(/\*\/\s*$/, "")
+              .replace(/^\s*(?:\/\*\*?|\*)/, "")
+              .replace(/[\s\u0085]+/g, " ")
+              .trim(),
+          );
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(path, source, ts.ScriptTarget.ES2023, true));
+  return lines;
 }
 
 /**

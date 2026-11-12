@@ -1,4 +1,5 @@
 import type { ContractType, Operation } from "../../model/contract-model.js";
+import { directionControls, spellUndocumentable } from "../../model/source-characters.js";
 
 /** Rust keywords and reserved identifiers that cannot spell a generated member */
 const reservedWords: Readonly<Record<string, true>> = {
@@ -46,12 +47,25 @@ const reservedWords: Readonly<Record<string, true>> = {
   false: true,
 };
 
+/** Rust spellings of the JSON escapes that Rust has no escape for */
+const jsonOnlyEscapes: Readonly<Record<string, string>> = {
+  "\\b": "\\u{8}",
+  "\\f": "\\u{c}",
+};
+
+/** Every direction control, matched one at a time: JSON leaves them unescaped and rustc refuses them in a literal */
+const directionControl = new RegExp(`[${directionControls}]`, "g");
+
 /** Rust literal escaping for an exact UTF-8 value
  * @param value - Unescaped contract spelling
  * @returns Rust string literal
  */
 export function quote(value: string): string {
-  return JSON.stringify(value).replace(/\\u([0-9a-fA-F]{4})/g, "\\u{$1}");
+  return JSON.stringify(value)
+    .replace(/\\(?:u([0-9a-fA-F]{4})|[\s\S])/g, (escape, unicode: string | undefined) =>
+      unicode === undefined ? (jsonOnlyEscapes[escape] ?? escape) : `\\u{${unicode}}`,
+    )
+    .replace(directionControl, (character) => `\\u{${character.charCodeAt(0).toString(16)}}`);
 }
 
 /** Portable Rust field spelling
@@ -83,14 +97,34 @@ export function stem(operation: Operation): string {
   return `${operation.name[0]?.toUpperCase()}${operation.name.slice(1)}`;
 }
 
+/** Line ends of documentation text: a bare CR is as much a line end as LF, because rustc rejects it inside a doc comment */
+const lineEnd = /\r\n?|\n/;
+
+/** Rustdoc lines of a text
+ * @param text - Documentation text
+ * @returns One `///` line for every line of the text, with each character that a comment cannot hold safely spelled out
+ */
+function rustdoc(text: string): string {
+  return spellUndocumentable(text)
+    .split(lineEnd)
+    .map((line) => `/// ${line}`)
+    .join("\n");
+}
+
 /** Declaration documentation without generated markdown injection
  * @param description - Source contract documentation
  * @param fallback - Purpose when source documentation is absent
  * @returns Rustdoc lines
  */
 export function doc(description: string, fallback: string): string {
-  return (description || fallback)
-    .split(/\r?\n/)
-    .map((line) => `/// ${line}`)
-    .join("\n");
+  return rustdoc(description || fallback);
+}
+
+/** Documentation of one parameter as a markdown list item
+ * @param name - Parameter spelling
+ * @param description - Source contract documentation of the parameter
+ * @returns Rustdoc line; the description is joined to one line because an unindented line would only lazily continue the item
+ */
+export function docItem(name: string, description: string): string {
+  return rustdoc(`- ${name}: ${description.split(lineEnd).join(" ")}`);
 }

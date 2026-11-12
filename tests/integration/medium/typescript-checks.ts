@@ -60,3 +60,11 @@ export const numericChecks = [
   "undeclared-body-behind-a-gateway-status-is-a-communication-failure",
   "ipc-keeps-null-and-void-results-distinct",
 ] as const;
+
+/** Guarantees the source-data consumer program reports one result line for each */
+export const sourceDataChecks = [
+  "closed-values-keep-their-contract-spelling-through-decode-and-encode",
+  "closed-value-lookalikes-are-rejected",
+  "object-with-hostile-member-names-round-trips",
+  "union-with-a-hostile-tag-round-trips",
+] as const;

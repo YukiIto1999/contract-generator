@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { expect } from "vite-plus/test";
 import { createTester, mockFile } from "@typespec/compiler/testing";
-import type { ContractModel, EmissionOptions } from "../../../../src/model/contract-model.js";
+import type {
+  ContractModel,
+  EmissionOptions,
+  GeneratedFile,
+} from "../../../../src/model/contract-model.js";
 import { compileContract } from "../../../../src/profile/compile-contract.js";
 import { $decorators, $lib } from "../../../../src/profile/library.js";
 import { rustFixtureFiles, type FixtureName } from "../../../fixtures/rust/materialize.js";
@@ -18,14 +22,18 @@ export interface CompilerMessage {
   readonly source: string;
 }
 
-/** Materialized and built native fixture crates for one contract */
-export interface Native {
-  /** Temporary directory owning the checkout and every output file of this fixture */
+/** Temporary checkout of written crates and the Cargo output directory of their builds */
+export interface Checkout {
+  /** Temporary directory owning the checkout and every output file */
   readonly base: string;
   /** Temporary checkout owning generated products and fixtures */
   readonly root: string;
   /** Cargo output directory shared by every build of this contract */
   readonly target: string;
+}
+
+/** Materialized and built native fixture crates for one contract */
+export interface Native extends Checkout {
   /** Generated crate prefix */
   readonly prefix: string;
   /** Public-codec observation executable */
@@ -50,16 +58,18 @@ if (cargoVersion === undefined)
   );
 
 /** Contract source interpreted through the real compiler with the decorators of this checkout
- * @param fixture - Fixed contract name
- * @returns Normalized contract and its integration options
- * @throws Error when the compiler or the profile refuses the fixed contract
+ * @param source - Checkout-relative path that the source text is compiled as, which resolves its imports
+ * @param namespace - Selected public contract
+ * @param contract - TypeSpec source text
+ * @returns Normalized contract
+ * @throws Error when the compiler or the profile refuses the contract
  */
-export async function canonicalModel(
-  fixture: FixtureName,
-): Promise<{ readonly model: ContractModel; readonly options: EmissionOptions }> {
-  const [source, namespace, prefix] = contracts[fixture];
+export async function modelFrom(
+  source: string,
+  namespace: string,
+  contract: string,
+): Promise<ContractModel> {
   const declarations = await readFile(join(repository, "lib/main.tsp"), "utf8");
-  const contract = await readFile(join(repository, source), "utf8");
   const [compiled, diagnostics] = await createTester(repository, { libraries: [] })
     .files({
       "lib/main.tsp": declarations,
@@ -73,14 +83,36 @@ export async function canonicalModel(
   expect(diagnostics.map((diagnostic) => diagnostic.message)).toEqual([]);
   const normalized = compileContract(compiled.program, namespace);
   if (normalized.isErr()) throw new Error(JSON.stringify(normalized.error));
+  return normalized.value;
+}
+
+/** Rust integration options of a contract
+ * @param namespace - Selected public contract
+ * @param prefix - Generated crate prefix
+ * @returns Options that select the Rust target only
+ */
+export function rustOptions(namespace: string, prefix: string): EmissionOptions {
   return {
-    model: normalized.value,
-    options: {
-      targets: ["rust"],
-      rustCratePrefix: prefix,
-      csharpNamespace: namespace,
-      typescriptEffectModule: undefined,
-    },
+    targets: ["rust"],
+    rustCratePrefix: prefix,
+    csharpNamespace: namespace,
+    typescriptEffectModule: undefined,
+  };
+}
+
+/** Fixed contract interpreted through the real compiler with the decorators of this checkout
+ * @param fixture - Fixed contract name
+ * @returns Normalized contract and its integration options
+ * @throws Error when the compiler or the profile refuses the fixed contract
+ */
+export async function canonicalModel(
+  fixture: FixtureName,
+): Promise<{ readonly model: ContractModel; readonly options: EmissionOptions }> {
+  const [source, namespace, prefix] = contracts[fixture];
+  const contract = await readFile(join(repository, source), "utf8");
+  return {
+    model: await modelFrom(source, namespace, contract),
+    options: rustOptions(namespace, prefix),
   };
 }
 
@@ -116,13 +148,13 @@ export function compilerMessages(stdout: string): CompilerMessage[] {
 }
 
 /** Cargo invocation with isolated intermediate and final build directories
- * @param native - Built fixture owning the checkout
+ * @param native - Checkout owning the crates
  * @param args - Cargo arguments
  * @param json - Request Cargo's machine-readable diagnostics
  * @returns Complete process outcome
  */
 export function cargo(
-  native: Native,
+  native: Checkout,
   args: readonly string[],
   json = true,
 ): SpawnSyncReturns<string> {
@@ -140,12 +172,12 @@ export function cargo(
 }
 
 /** Offline Cargo command that must succeed without any warning from a generated or fixture crate
- * @param native - Built fixture owning the checkout
+ * @param native - Checkout owning the crates
  * @param subcommand - Cargo subcommand
  * @param args - Remaining Cargo arguments
  * @returns Cargo stdout
  */
-export function cleanCargo(native: Native, subcommand: string, args: readonly string[]): string {
+export function cleanCargo(native: Checkout, subcommand: string, args: readonly string[]): string {
   const outcome = cargo(native, [subcommand, "--offline", ...args]);
   const warnings = compilerMessages(outcome.stdout)
     .filter((message) => message.source.startsWith(native.root) && message.level === "warning")
@@ -158,6 +190,27 @@ export function cleanCargo(native: Native, subcommand: string, args: readonly st
   return outcome.stdout;
 }
 
+/** Generated files written to a temporary checkout
+ * @param prefix - Generated crate prefix
+ * @param files - Complete generated and fixture files with paths relative to the checkout
+ * @returns Checkout without any build
+ */
+export async function writeCheckout(
+  prefix: string,
+  files: readonly GeneratedFile[],
+): Promise<Checkout> {
+  const base = await mkdtemp(join(tmpdir(), `contract-rust-${prefix}-`));
+  const root = join(base, "checkout");
+  const shared = process.env.RUST_CONTRACT_TARGET_DIR;
+  const target = shared === undefined ? join(base, "target") : join(shared, prefix);
+  for (const file of files) {
+    const path = join(root, file.path);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, file.content);
+  }
+  return { base, root, target };
+}
+
 /** Fixture crates written to a temporary checkout
  * @param fixture - Fixed contract name
  * @returns Native description without any build
@@ -165,36 +218,23 @@ export function cleanCargo(native: Native, subcommand: string, args: readonly st
 export async function materialize(fixture: FixtureName): Promise<Native> {
   const { model, options } = await canonicalModel(fixture);
   const prefix = options.rustCratePrefix;
-  const base = await mkdtemp(join(tmpdir(), `contract-rust-${prefix}-`));
-  const root = join(base, "checkout");
-  const shared = process.env.RUST_CONTRACT_TARGET_DIR;
-  const target = shared === undefined ? join(base, "target") : join(shared, prefix);
-  for (const file of rustFixtureFiles(fixture, model, options)) {
-    const path = join(root, file.path);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, file.content);
-  }
+  const checkout = await writeCheckout(prefix, rustFixtureFiles(fixture, model, options));
   return {
-    base,
-    root,
-    target,
+    ...checkout,
     prefix,
-    codec: join(target, "debug/codec"),
-    driver: join(target, `debug/${prefix}-fixture-driver`),
+    codec: join(checkout.target, "debug/codec"),
+    driver: join(checkout.target, `debug/${prefix}-fixture-driver`),
   };
 }
 
 /** Optional network step that populates the Cargo cache for the offline builds
- * @param native - Materialized fixture
+ * @param checkout - Written checkout
+ * @param manifests - Cargo manifests of the checkout, relative to it
  */
-function fetchDependencies(native: Native): void {
+export function fetchDependencies(checkout: Checkout, manifests: readonly string[]): void {
   if (process.env.RUST_CONTRACT_FETCH !== "1") return;
-  for (const manifest of [
-    "rust/Cargo.toml",
-    "rust/fixture-codec/Cargo.toml",
-    "rust/fixture-driver/Cargo.toml",
-  ]) {
-    const fetched = cargo(native, ["fetch", "--manifest-path", manifest], false);
+  for (const manifest of manifests) {
+    const fetched = cargo(checkout, ["fetch", "--manifest-path", manifest], false);
     expect({
       manifest,
       status: fetched.status,
@@ -214,7 +254,11 @@ function fetchDependencies(native: Native): void {
  */
 export async function build(fixture: FixtureName, everything = false): Promise<Native> {
   const native = await materialize(fixture);
-  fetchDependencies(native);
+  fetchDependencies(native, [
+    "rust/Cargo.toml",
+    "rust/fixture-codec/Cargo.toml",
+    "rust/fixture-driver/Cargo.toml",
+  ]);
   if (everything) {
     cleanCargo(native, "build", [
       "--manifest-path",
@@ -243,9 +287,9 @@ export async function build(fixture: FixtureName, everything = false): Promise<N
   return native;
 }
 
-/** Removal of the temporary files owned by one fixture
- * @param native - Built fixture
+/** Removal of the temporary files owned by one checkout
+ * @param checkout - Written checkout
  */
-export async function dispose(native: Native | undefined): Promise<void> {
-  if (native !== undefined) await rm(native.base, { recursive: true, force: true });
+export async function dispose(checkout: Checkout | undefined): Promise<void> {
+  if (checkout !== undefined) await rm(checkout.base, { recursive: true, force: true });
 }

@@ -1,4 +1,5 @@
 import { compareText } from "../../model/ordering.js";
+import { directionControls, spellUndocumentable } from "../../model/source-characters.js";
 
 /** Nested source fragments flattened by {@link lines} */
 export type SourcePart = string | readonly SourcePart[] | false | undefined;
@@ -17,13 +18,19 @@ export interface DocTags {
   readonly throws?: readonly [error: string, condition: string];
 }
 
+/** Every direction control, matched one at a time: JSON leaves them unescaped, and they reorder how the source is displayed */
+const directionControl = new RegExp(`[${directionControls}]`, "g");
+
 /**
  * Stable JavaScript source string with sorted object keys
  * @param value - Source-independent JSON-compatible value
- * @returns Escaped literal
+ * @returns Escaped literal in which no direction control reorders the source
  */
 export function quote(value: unknown): string {
-  return JSON.stringify(value, sortedKeys) ?? "undefined";
+  return (JSON.stringify(value, sortedKeys) ?? "undefined").replace(
+    directionControl,
+    (character) => `\\u${character.charCodeAt(0).toString(16)}`,
+  );
 }
 
 /**
@@ -78,12 +85,12 @@ export function indent(text: string, depth = 1): string {
  * Single-line comment text that cannot close its comment
  * @param text - Contract documentation
  * @param fallback - Text for an undocumented declaration
- * @returns Safe single-line text
+ * @returns Safe single-line text: every JavaScript line terminator is a space, and each character that a comment cannot hold safely is spelled out
  */
 export function docText(text: string, fallback: string): string {
-  const flat = text
+  const flat = spellUndocumentable(text)
     .replace(/\*\//g, "* /")
-    .replace(/\s*\r?\n\s*/g, " ")
+    .replace(/\s*[\r\n\u2028\u2029]\s*/g, " ")
     .trim();
   return flat === "" ? fallback : flat;
 }

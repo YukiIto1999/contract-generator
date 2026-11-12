@@ -30,7 +30,7 @@ function declaration(ctx: RustContext, type: UnionType): string {
   const cases = type.variants
     .map(
       (variant) =>
-        `/// Payload for exact tag ${variant.tag}\n${variant.name}(${useType(ctx, variant.type)}),`,
+        `${doc("", `Payload for exact tag ${variant.tag}`)}\n${variant.name}(${useType(ctx, variant.type)}),`,
     )
     .join("\n");
   return `${doc(type.description, "Closed accepted discriminator-selected value")}

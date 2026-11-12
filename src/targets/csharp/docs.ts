@@ -1,4 +1,5 @@
-import { name } from "./naming.js";
+import { spellUndocumentable } from "../../model/source-characters.js";
+import { name, newLineCharacters } from "./naming.js";
 
 /** Documented parameter: a bare name takes the shared description of that name */
 export type DocParam = string | readonly [name: string, description: string];
@@ -31,13 +32,16 @@ const shared: Readonly<Record<string, string>> = {
   command: "Command name",
 };
 
+/** Runs of whitespace and of C# new-line characters, which end a documentation comment line even where `\s` omits them */
+const whitespaceRun = new RegExp(`[\\s${newLineCharacters}]+`, "gu");
+
 /** XML text escaping with whitespace normalization
  * @param text - Documentation prose
  * @returns Single-line XML text
  */
 function xml(text: string): string {
-  return text
-    .replace(/\s+/g, " ")
+  return spellUndocumentable(text)
+    .replace(whitespaceRun, " ")
     .trim()
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

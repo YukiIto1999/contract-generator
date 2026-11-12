@@ -1,3 +1,5 @@
+import { directionControls } from "../../model/source-characters.js";
+
 /** JSON media-type essence classification
  * @param mediaType - Declared media selector
  * @returns Whether the body is a JSON text rather than raw bytes
@@ -15,14 +17,21 @@ export function essenceOf(mediaType: string): string {
   return mediaType.split(";")[0]!.trim().toLowerCase();
 }
 
+/** Characters that end a line of C# source: CR, LF, NEL, LS and PS (the New_Line_Character set of ECMA-334) */
+export const newLineCharacters = "\r\n\u0085\u2028\u2029";
+
+/** Every character that a literal must escape, matched one at a time: the new-line characters that end a line, and the direction controls that reorder how the source is displayed */
+const unescaped = new RegExp(`[${newLineCharacters}${directionControls}]`, "gu");
+
 /** Deterministic C# string literal
  * @param value - Literal content
- * @returns Escaped C# literal
+ * @returns Escaped C# literal in which no new-line character ends the line and no direction control reorders the source
  */
 export function quote(value: string): string {
-  return JSON.stringify(value)
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
+  return JSON.stringify(value).replace(
+    unescaped,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 /** Portable declaration identifier

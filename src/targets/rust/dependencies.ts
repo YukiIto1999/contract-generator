@@ -37,10 +37,10 @@ missing_docs_in_private_items = "deny"
  * @param prefix - Cargo package prefix
  * @param unit - Dependency-unit suffix
  * @param dependencies - Exact package dependency declarations
- * @returns Standalone crate manifest
+ * @returns Standalone crate manifest; its doctests are off, because a fenced block in a contract description would otherwise compile and run under `cargo test`
  */
 function manifest(prefix: string, unit: string, dependencies: string): string {
-  return `[package]\nname = "${prefix}-${unit}"\nversion = "0.1.0"\nedition = "2024"\nrust-version = "1.85"\npublish = false\n\n[lints]\nworkspace = true\n\n[dependencies]\n${dependencies}\n`;
+  return `[package]\nname = "${prefix}-${unit}"\nversion = "0.1.0"\nedition = "2024"\nrust-version = "1.85"\npublish = false\n\n[lints]\nworkspace = true\n\n[lib]\ndoctest = false\n\n[dependencies]\n${dependencies}\n`;
 }
 
 /** Cargo workspace and package manifests of the four dependency units

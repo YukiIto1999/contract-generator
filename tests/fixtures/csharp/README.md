@@ -160,6 +160,8 @@ The no-default download operation reuses `DownloadInput` rather than generating 
 The `defaults` handler reports the effective branch through the public properties that a handler reads.
 `UnixInstant` with an `unixTimestamp` binding and a model named like a generated operation type are rejected at generation with source-addressed issues, which `csharp-diagnostics.test.ts` and `src/targets/csharp/render-csharp.test.ts` assert without needing `dotnet`.
 
+A third contract, namespace `SourceData`, has no operations. `csharp-source-data.test.ts` writes its TypeSpec inline from `hostile-source.ts` instead of reading a `.tsp` file, because its descriptions, wire name, closed values and tag carry NEL, LS, PS, CR, direction controls and control characters that a source file would hide in diffs. `SourceDataDriver` references only the generated types project and prints, for each JSON-lines request with a `type` and a `payload`, `accepted`, `encoded` and the violations. The test reads the XML documentation that the compiler wrote for the types assembly, so a description that left its documentation line fails by its text.
+
 ## Not exercised
 
 - A native Tauri application or UI; IPC is the generic injected transport over a child process.

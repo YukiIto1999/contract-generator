@@ -45,10 +45,11 @@ export interface ContractSuite {
 }
 
 /** Registering the build of a contract before the tests of the current file and its removal afterward
- * @param source - Checkout-relative TypeSpec source path
+ * @param source - Checkout-relative TypeSpec source path, which also resolves the imports of an inline source text
  * @param namespace - Selected public contract
  * @param projects - Driver project files to build
  * @param after - Cleanup that runs before the fixture directory is removed
+ * @param text - Contract source text; the checkout file is read when omitted
  * @returns Accessors that are valid inside the tests
  */
 export function useContract(
@@ -56,11 +57,12 @@ export function useContract(
   namespace: string,
   projects: readonly string[],
   after: () => Promise<void> = async () => undefined,
+  text?: string,
 ): ContractSuite {
   let state: BuiltContract | undefined;
   if (toolchain.available)
     beforeAll(async () => {
-      state = await buildContract(source, namespace, projects);
+      state = await buildContract(source, namespace, projects, text);
     }, 1_200_000);
   afterAll(async () => {
     await after();
