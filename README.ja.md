@@ -169,7 +169,9 @@ emitter は印を削除せず競合を報告し、復旧には所有者が残っ
 
 生成する project は、TypeModeling と EffectSystem を、`v0.2.0` の tag の source checkout から参照する。
 二つの checkout は `typemodeling-dotnet/` と `effectsystem-dotnet/` の名前で隣に並べる。
-project の path は、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` で渡す。
+project の絶対 path は、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` として、command line の global property か環境変数で渡す。
+利用側の `.csproj` だけに置いた property は参照先へ伝わらない。
+共有する `Directory.Build.props` から渡す場合は、生成した project にもその設定が適用される配置にする。
 生成する三つの project は `csharp/Contract.Analysis.props` を import し、既存の `TypeModeling.Analyzers` を参照して網羅性の診断をエラーにする。
 analyzer の assembly は実行時の依存には含めない。
 MSBuild の project 参照では analyzer の参照と警告の方針が伝播しないため、利用側の各 project も同じ生成ファイルを import する。
@@ -185,7 +187,23 @@ MSBuild の project 参照では analyzer の参照と警告の方針が伝播�
 </ItemGroup>
 ```
 
-`TypeModelingProjectPath` は前述のとおり import より前に渡し、生成した project と同じ source checkout を参照する。
+利用側の project の directory から次を実行し、`/absolute/path` は二つの source checkout がある directory に置き換える。
+
+```sh
+dotnet build Consumer.csproj \
+  -p:TypeModelingProjectPath=/absolute/path/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj \
+  -p:EffectSystemProjectPath=/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj
+```
+
+types の単位だけを使う consumer では、`EffectSystemProjectPath` を省ける。
+生成する provider と client は、`EffectSystem.Analyzers` を参照して利用規則の診断をエラーにする `csharp/Contract.EffectAnalysis.props` も import する。
+`Effect` を使う consumer は、`Contract.Analysis.props` の後に次の import を加える。
+
+```xml
+<Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" />
+```
+
+どちらの import も、analyzer の assembly を実行時の依存には含めない。
 共有した import は、analyzer の project がない場合に検査を黙って省かず、エラーにする。
 閉じた型の switch は全 variant を列挙し、default・discard の arm を置かない。
 固定した analyzer は、variant の欠落と閉じた型に対する switch 文を拒否するが、利用側が switch 式に書く catchall の arm までは禁止しない。

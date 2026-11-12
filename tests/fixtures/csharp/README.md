@@ -76,11 +76,12 @@ For the second contract, generate `features.tsp` with `csharp-namespace` `Featur
 
 `exhaustiveness.tsp` declares a discriminator union, a mixed-kind enumeration, two successes and two declared rejections.
 `ExhaustivenessProbe.csproj` references all three generated units and compiles one hand-written consumer from `probes/$(Probe).cs`.
-The fixture's `Directory.Build.props` imports the delivered `csharp/Contract.Analysis.props` from `GeneratedContractRoot`; it does not define a separate analyzer reference or exhaustiveness policy.
+The fixture's `Directory.Build.props` imports the delivered `csharp/Contract.Analysis.props` and, when `EffectSystemProjectPath` is supplied, `csharp/Contract.EffectAnalysis.props`; it does not define separate analyzer references or error policies.
 The default `ExhaustiveConsumer` matches every public variant without a catchall, including operation failures, provider failures and the runtime's generic `Result`.
 Its executable observes both union and enumeration variants and the ordinary rejection of unknown or null wire inputs.
 The `MissingChoice`, `MissingMixed`, `MissingSuccess`, `MissingRejection`, `MissingFailure`, `MissingProviderFailure`, `GuardedChoice` and `OpenExpression` probes are expected to fail with an exhaustiveness error.
 `ClosedStatement` is expected to fail with `TYPMOD001`.
+`UnconstructedEffect` is expected to fail with `EFFSYS008` when a consumer returns `default` instead of constructing an effect.
 These are native consumer compilation tests, not generated-source or project-wiring assertions.
 
 The pinned analyzer does **not** forbid a discard arm in a consumer's switch expression.
