@@ -1,4 +1,5 @@
 import type { Constant, Constraints } from "../model/contract-model.js";
+import { preparePattern } from "../model/patterns/compiled-pattern.js";
 import { compareNumbers } from "./numeric-bounds.js";
 
 /** Canonical textual form of a UUID with either letter case */
@@ -7,9 +8,10 @@ const uuidText = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
 /**
  * Scalar and collection restrictions applied to an exact constant
  * @param value - Candidate constant
- * @param constraints - Effective inherited and use-site restrictions
+ * @param constraints - Preflighted effective inherited and use-site restrictions
  * @param path - Source constant property path
  * @returns Applicable restriction violations
+ * @throws {@link Error} Pattern escaping preflight or an unexpected engine defect
  */
 export function checkConstantConstraints(
   value: Constant,
@@ -56,9 +58,10 @@ function checkNumber(text: string, constraints: Constraints, path: string): stri
 /**
  * Length, format and pattern violations of a string constant
  * @param text - String constant
- * @param constraints - Effective restrictions
+ * @param constraints - Restrictions with preflighted safe patterns
  * @param path - Source constant property path
  * @returns Violations counted in Unicode code points
+ * @throws {@link Error} Pattern escaping preflight or an unexpected engine defect
  */
 function checkString(text: string, constraints: Constraints, path: string): string[] {
   const reasons: string[] = [];
@@ -69,8 +72,10 @@ function checkString(text: string, constraints: Constraints, path: string): stri
     reasons.push(`${path}: default violates maxLength`);
   if (constraints.format === "uuid" && !uuidText.test(text))
     reasons.push(`${path}: default violates UUID format`);
-  if (constraints.pattern !== undefined && !new RegExp(constraints.pattern, "u").test(text))
-    reasons.push(`${path}: default violates pattern`);
+  if (constraints.pattern !== undefined && reasons.length === 0) {
+    const prepared = preparePattern(constraints.pattern).unwrap();
+    if (!prepared.expression.test(text)) reasons.push(`${path}: default violates pattern`);
+  }
   return reasons;
 }
 

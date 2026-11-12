@@ -4,7 +4,16 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   build: {
     lib: { entry: "src/index.ts", formats: ["es"], fileName: "index" },
-    rolldownOptions: { external: [/^@typespec\//, /^node:/, "ts-results-es", "lossless-json"] },
+    rolldownOptions: {
+      external: [
+        /^@typespec\//,
+        /^node:/,
+        "@eslint-community/regexpp",
+        "re2js",
+        "ts-results-es",
+        "lossless-json",
+      ],
+    },
     sourcemap: true,
   },
   test: { include: ["src/**/*.test.ts", "tests/**/*.test.ts"] },

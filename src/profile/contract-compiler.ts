@@ -51,6 +51,14 @@ export function compileNamespace(
   }
   registerIndexerDecorator(state);
   const operations = normalizeOperations(state, state.namespace);
+  if (
+    state.issues.some(
+      (issue) => issue.code === "invalid-pattern" || issue.code === "unsupported-pattern",
+    )
+  ) {
+    sortIssuesCanonically(state.issues);
+    return Err(state.issues);
+  }
   normalizeFieldDefaults(state);
   validatePendingDefaults(state);
   validateDomains(state.types, operations, (origin) => state.targetAt(origin), state.issue);

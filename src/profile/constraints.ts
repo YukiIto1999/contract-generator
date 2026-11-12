@@ -19,6 +19,7 @@ import {
   type Type,
 } from "@typespec/compiler";
 import type { Bound, Constraints } from "../model/contract-model.js";
+import { preparePattern } from "../model/patterns/compiled-pattern.js";
 import type { IssueSink } from "./issue-sink.js";
 import type { MutableConstraints } from "./numeric-bounds.js";
 import type { ExactNumber } from "./numbers.js";
@@ -132,7 +133,7 @@ function readFormat(
 }
 
 /**
- * Pattern restriction that must be a valid Unicode ECMAScript expression
+ * Pattern restriction within the common safe Unicode execution profile
  * @param program - Fully checked compiler program
  * @param target - Declaration or property owning the restriction
  * @param issue - Source-addressed failure accumulator
@@ -146,16 +147,9 @@ function readPattern(
 ): void {
   const pattern = getPattern(program, target);
   if (pattern === undefined) return;
-  try {
-    new RegExp(pattern, "u");
-    result.pattern = pattern;
-  } catch {
-    issue(
-      "invalid-pattern",
-      target,
-      "The pattern is not a valid Unicode ECMAScript regular expression",
-    );
-  }
+  const prepared = preparePattern(pattern);
+  if (prepared.isErr()) issue(prepared.error.code, target, prepared.error.reason);
+  else result.pattern = pattern;
 }
 
 /**

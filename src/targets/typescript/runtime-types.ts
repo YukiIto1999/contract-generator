@@ -98,7 +98,7 @@ export interface Codec<T> {
   /**
    * Local acceptance without defaults
    * @param input - Untrusted local candidate
-   * @returns Accepted immutable value or complete violations
+   * @returns Accepted immutable value or applicable violations with same-value pattern checks skipped after cheap failures
    */
   create(input: unknown): Result<Accepted<T>, readonly Violation[]>;
   /**
