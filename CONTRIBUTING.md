@@ -63,6 +63,8 @@ TypeSpec の decorator を解釈するのは `src/profile/` だけであり、�
 検証は、`devenv shell` の中で、リポジトリの root から `npm run verify` として実行する。
 環境の検証の門は、devenv の `scripts.verify` を通じて同じ入口を `devenv shell -- verify` で呼ぶ。
 この入口は、build、型検査、format と lint の検査、test を順に実行する。
+一走行の資源保護の上限は、root の [`tiergate.json`](./tiergate.json) の `verify.seconds` を正本とする。
+依存 source と cache を準備した WSL2 での全量走行は約9分だったため、その条件で10分以内に結果を返すことを目標とし、上限には資源待ちと結果確定の余裕を設ける。
 lint は警告を失敗として扱い、file は 300 行、関数は 50 行、ネストは 4 段を上限とする。
 上限は抑止の指示で回避せず、責務ごとに file と関数を分ける。
 
