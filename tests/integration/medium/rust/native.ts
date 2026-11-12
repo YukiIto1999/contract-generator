@@ -13,6 +13,7 @@ import { compileContract } from "../../../../src/profile/compile-contract.js";
 import { $decorators, $lib } from "../../../../src/profile/library.js";
 import { rustFixtureFiles, type FixtureName } from "../../../fixtures/rust/materialize.js";
 import { field, repository } from "./protocol.js";
+import { requireRustToolchain } from "./toolchain.js";
 
 /** Rust compiler diagnostic of a path package */
 export interface CompilerMessage {
@@ -49,13 +50,8 @@ const contracts: Readonly<Record<FixtureName, readonly [string, string, string]>
   guarantees: ["tests/fixtures/rust/guarantees/main.tsp", "Guarantees", "guarantees"],
 };
 
-/** Installed native toolchain identity; absent when Cargo is not on PATH */
-const probe = spawnSync("cargo", ["--version"], { encoding: "utf8" });
-export const cargoVersion = probe.status === 0 ? probe.stdout.trim() : undefined;
-if (cargoVersion === undefined)
-  console.warn(
-    "Rust native verification NOT RUN: cargo is not available on PATH; enter the pinned toolchain with `devenv shell`",
-  );
+/** Installed package manager identity for native acceptance */
+export const cargoVersion = requireRustToolchain();
 
 /** Contract source interpreted through the real compiler with the decorators of this checkout
  * @param source - Checkout-relative path that the source text is compiled as, which resolves its imports
@@ -251,40 +247,46 @@ export function fetchDependencies(checkout: Checkout, manifests: readonly string
  * @param fixture - Fixed contract name
  * @param everything - Also build each generated crate alone and the whole workspace
  * @returns Built native fixture
+ * @throws {@link Error} Native build failure after removing the owned temporary checkout
  */
 export async function build(fixture: FixtureName, everything = false): Promise<Native> {
   const native = await materialize(fixture);
-  fetchDependencies(native, [
-    "rust/Cargo.toml",
-    "rust/fixture-codec/Cargo.toml",
-    "rust/fixture-driver/Cargo.toml",
-  ]);
-  if (everything) {
-    cleanCargo(native, "build", [
-      "--manifest-path",
+  try {
+    fetchDependencies(native, [
       "rust/Cargo.toml",
-      "--workspace",
-      "--all-targets",
+      "rust/fixture-codec/Cargo.toml",
+      "rust/fixture-driver/Cargo.toml",
     ]);
-    for (const crate of ["types", "transport", "provider", "client"])
+    if (everything) {
       cleanCargo(native, "build", [
         "--manifest-path",
         "rust/Cargo.toml",
-        "--package",
-        `${native.prefix}-${crate}`,
+        "--workspace",
+        "--all-targets",
       ]);
+      for (const crate of ["types", "transport", "provider", "client"])
+        cleanCargo(native, "build", [
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--package",
+          `${native.prefix}-${crate}`,
+        ]);
+    }
+    cleanCargo(native, "build", [
+      "--manifest-path",
+      "rust/fixture-codec/Cargo.toml",
+      "--all-targets",
+    ]);
+    cleanCargo(native, "build", [
+      "--manifest-path",
+      "rust/fixture-driver/Cargo.toml",
+      "--all-targets",
+    ]);
+    return native;
+  } catch (failure) {
+    await dispose(native);
+    throw failure;
   }
-  cleanCargo(native, "build", [
-    "--manifest-path",
-    "rust/fixture-codec/Cargo.toml",
-    "--all-targets",
-  ]);
-  cleanCargo(native, "build", [
-    "--manifest-path",
-    "rust/fixture-driver/Cargo.toml",
-    "--all-targets",
-  ]);
-  return native;
 }
 
 /** Removal of the temporary files owned by one checkout

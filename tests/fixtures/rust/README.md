@@ -28,7 +28,13 @@ The generated provider answers only declared results. `dispatch_http` and `dispa
 
 Generated product manifests own the exact direct versions in `src/targets/rust/dependencies.ts::rustDependencies`. In particular, `serde_json` must retain `arbitrary_precision`; a binary64 JSON parser is not interchangeable.
 
-The integration environment is pinned to rustc/cargo **1.94.0**, GCC **15.2.0**, OpenSSL **3.6.1**, and pkg-config **0.29.2** from Nixpkgs `456e8a9468b9d46bd8c9524425026c00745bc4d2`; enter it with `devenv shell` from the repository root. Product manifests declare edition 2024 with Rust **1.85** as their minimum. Only 1.94.0 has been used to compile and run these fixtures; no compiler 1.85 was available, so the declared minimum has not been exercised.
+The integration compiler is rustc/cargo **1.94.0** from the Nixpkgs revision pinned in `devenv.yaml`; enter it with `devenv shell` from the repository root.
+`src/targets/rust/dependencies.ts::rustMinimumVersion` owns the supported compiler floor and supplies every generated manifest and generated Rust README.
+The floor is **1.94.0**, rather than an older compiler inferred only from edition 2024.
+This is a tested-support policy, not a claim that every older compiler is incapable of compiling the output or that a frozen Nix pin automatically tracks new stable releases.
+General native acceptance requires that version or a newer compatible compiler.
+The minimum-version proof is this same collection run once with `RUST_CONTRACT_EXACT_MINIMUM=1`, under which `native.ts` fails every suite unless rustc and Cargo are exactly 1.94.0; no separate suite repeats the builds.
+Evidence from a newer compiler is never evidence for the minimum.
 
 ## Lints
 
@@ -44,9 +50,12 @@ npm exec vp -- test run src/targets/rust tests/integration/medium/rust-
 
 Each test file materializes the contracts it needs into a temporary directory, builds with the existing Cargo cache via `--offline` and removes the temporary files and processes it owns. Every Cargo build uses `--message-format=json`; any warning from a generated or fixture crate fails the suite. `rust-native-build.test.ts` builds each generated crate alone, compares `cargo tree` against the dependency contract, reports each public constructor regression as its own test and runs the compile-only probes.
 
-When `cargo` is not on `PATH` the native tests are registered as skipped and a warning is written to stderr; the hermetic tests under `src/targets/rust` still run. A missing cache dependency is a prerequisite failure, not a skip.
+A missing or unsupported rustc/Cargo toolchain and a missing cache dependency are prerequisite failures, never skipped tests.
 
-Environment switches, both optional:
+Environment switches, all optional:
 
 - `RUST_CONTRACT_FETCH=1` runs `cargo fetch` for the manifests of each fixture before the offline builds. This is the single network step; run it once to populate `CARGO_HOME`.
 - `RUST_CONTRACT_TARGET_DIR=<dir>` keeps Cargo's output in `<dir>/<prefix>` instead of the temporary checkout, so repeated runs reuse compiled dependencies. The suite never deletes it.
+- `RUST_CONTRACT_EXACT_MINIMUM=1` demands rustc and Cargo equal to `rustMinimumVersion` instead of that version or newer.
+
+The [real Tauri fixture](../tauri/README.md) adds a Wry webview-to-host path; the generic process IPC fixtures here do not stand in for a desktop runtime.

@@ -1,3 +1,4 @@
+import { rustMinimumVersion } from "./dependencies.js";
 import type { RustContext } from "./context.js";
 
 /** Description of construction, codecs and the numeric and temporal representations */
@@ -34,7 +35,7 @@ export function renderReadme(ctx: RustContext): string {
 
 The types crate owns immutable validated values and codecs without an HTTP or async-runtime dependency. The transport crate supplies standard Future/Result interfaces and the adopted CancellationToken. Provider and client crates depend on types and transport independently.
 
-Rust edition 2024 and rustc >=1.85.0 are required by the manifests. The consuming workspace owns its compiler pin. Direct dependency versions are exact in each manifest. serde_json arbitrary_precision is required and must not be removed. Commit the consumer Cargo.lock for its complete transitive resolution. Each crate inherits the workspace lints (\`[lints] workspace = true\`); the generated workspace defines them, and a consuming workspace supplies its own.
+Rust edition 2024 and rustc >=${rustMinimumVersion} are required by the manifests. This supported floor follows the generator's pinned native acceptance toolchain rather than the edition's historical compiler floor. The consuming workspace owns its compiler pin and may use a newer compatible compiler. Direct dependency versions are exact in each manifest. serde_json arbitrary_precision is required and must not be removed. Commit the consumer Cargo.lock for its complete transitive resolution. Each crate inherits the workspace lints (\`[lints] workspace = true\`); the generated workspace defines them, and a consuming workspace supplies its own.
 
 ${construction}
 

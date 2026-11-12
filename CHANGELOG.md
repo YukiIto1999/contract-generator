@@ -10,6 +10,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 - C#, Rust, and TypeScript generation of public types, validated construction, codecs, provider acceptance and dispatch, and HTTP and IPC consumers.
 - Reference projections to JSON Schema, OpenAPI, and Markdown.
 - Output publication that replaces the whole generated tree, refuses unowned or hand-edited output, restores the previous output when an earlier replacement was interrupted, and has a read-only drift check.
+- A real Linux Tauri/Wry webview acceptance fixture connects generated TypeScript consumers to generated Rust provider dispatch, including provider defaults, declared rejection, invalid wire input, state preservation, cancellation, and orderly shutdown.
 
 ### Fixed
 
@@ -19,3 +20,4 @@ This project follows [Semantic Versioning](https://semver.org/).
 - C# setup instructions now pass dependency paths to referenced projects explicitly.
 - Declared a finite verification time budget for the existing full verification entry, based on measured native-test runs.
 - Generated C#, Rust and TypeScript now keep contract descriptions, wire names, discriminator tags and string values as data: no line end or control character in a description or tag can leave its documentation comment or add code to the generated source, characters that XML or a comment cannot hold and the Unicode direction controls are spelled `\u{XXXX}` in documentation and escaped in literals, C# string literals escape NEL, LS and PS, Rust string literals keep text such as `\u0041` and the backspace and form-feed characters exactly, and the generated Rust crates run no doctests, so a fenced code block in a description is never compiled or executed.
+- Generated Rust manifests now require 1.94.0, the pinned native acceptance compiler, instead of advertising unexercised 1.85 support; the existing native Rust acceptance collection proves the exact minimum when run with `RUST_CONTRACT_EXACT_MINIMUM=1`, while general native builds allow newer compatible compilers.
