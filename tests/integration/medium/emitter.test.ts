@@ -63,6 +63,29 @@ test(
 );
 
 test(
+  "an unsafe route template fails with a source location and keeps the previous output",
+  { timeout },
+  async () => {
+    const directory = join(root, "unsafe-route");
+    expect((await generate(directory, fixture)).code).toBe(0);
+    const before = await digests(join(directory, "out"));
+    for (const route of ["//submit", "/submit/..", "/%2e%2E/submit"]) {
+      const unsafe = fixture.replace(
+        '@@httpBinding(submit, "POST", "/submit");',
+        `@@httpBinding(submit, "POST", "${route}");`,
+      );
+      expect(unsafe, route).not.toBe(fixture);
+      const failed = await generate(directory, unsafe);
+      expect(failed.code, route).not.toBe(0);
+      expect(failed.text, route).toMatch(/main\.tsp:\d+:\d+/);
+      expect(failed.text, route).toContain("invalid-http-path");
+      expect(await digests(join(directory, "out")), route).toEqual(before);
+    }
+    expect((await readdir(directory)).sort()).toEqual(["main.tsp", "out", "tspconfig.yaml"]);
+  },
+);
+
+test(
   "check mode fails on a changed contract without rewriting the output",
   { timeout },
   async () => {

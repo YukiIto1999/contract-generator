@@ -29,12 +29,27 @@ fn parameter_text(value: Value) -> String { match value { Value::String(value) =
 `,
   ),
   support(
-    "percent_segment",
+    "path_segment",
     String.raw`/// Percent encoding of a single path parameter
 ///
 /// - value: scalar text
-/// - Return: unambiguous path segment
-fn percent_segment(value: &str) -> String { url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>().replace('+', "%20") }
+/// - Return: unambiguous path segment, or none for the empty text and the dot segments that no segment carries unchanged
+fn path_segment(value: &str) -> Option<String> {
+    if matches!(value, "" | "." | "..") { return None; }
+    Some(url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>().replace('+', "%20"))
+}
+`,
+  ),
+  support(
+    "same_origin",
+    String.raw`/// Origin identity of a constructed request URL
+///
+/// - url: constructed request URL
+/// - origin: service origin supplied by the host
+/// - Return: whether scheme, host and port are those of the service origin
+fn same_origin(url: &reqwest::Url, origin: &reqwest::Url) -> bool {
+    url.scheme() == origin.scheme() && url.host() == origin.host() && url.port_or_known_default() == origin.port_or_known_default()
+}
 `,
   ),
 ];

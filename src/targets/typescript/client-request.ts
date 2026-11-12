@@ -18,22 +18,26 @@ function memberOf(input: ObjectType, parameter: HttpParameter): string {
  * Statements placing parameters outside the body
  * @param input - Operation parameter object
  * @param http - HTTP binding
- * @returns Path substitutions followed by query and header placements
+ * @returns Route URL on the service origin followed by query and header placements, each leaving with the communication failure of a value without a wire form
  */
 function placementStatements(input: ObjectType, http: HttpBinding): SourcePart {
-  const path = http.parameters
+  const placements = http.parameters
     .filter((parameter) => parameter.location === "path")
     .map(
-      (parameter) =>
-        `path = path.replace(${quote(`{${parameter.wireName}}`)}, encodeURIComponent(wireText(wire, ${quote(memberOf(input, parameter))})!));`,
+      (parameter) => `[${quote(`{${parameter.wireName}}`)}, ${quote(memberOf(input, parameter))}]`,
     );
   const rest = http.parameters
     .filter((parameter) => parameter.location !== "path")
     .map((parameter) => {
       const target = parameter.location === "query" ? "url.searchParams" : "headers";
-      return `placeValue(${target}, ${quote(parameter.wireName)}, wire, ${quote(memberOf(input, parameter))});`;
+      return `if (!placeValue(${target}, ${quote(parameter.wireName)}, wire, ${quote(memberOf(input, parameter))})) return noWireForm();`;
     });
-  return [path, "const url = new URL(path, baseUrl);", "const headers = new Headers();", rest];
+  return [
+    `const url = routeUrl(baseUrl, ${quote(http.path)}, wire, [${placements.join(", ")}]);`,
+    "if (url === undefined) return noWireForm();",
+    "const headers = new Headers();",
+    rest,
+  ];
 }
 
 /**
@@ -99,10 +103,11 @@ export function requestSource(
         ["input", "Public client input"],
         ["signal", "Host cancellation carried by the request"],
       ],
-      returns: "Request with placed parameters and the declared body",
+      returns:
+        "Request with placed parameters and the declared body, or the communication failure of a value without an HTTP wire form",
       throws: ["C.ContractDefect", "Input that violates the contract"],
     }),
-    `function build${stem}Request(baseUrl: string, input: C.${input.name}, signal: AbortSignal): Request {`,
+    `function build${stem}Request(baseUrl: string, input: C.${input.name}, signal: AbortSignal): Result<Request, C.CommunicationFailure> {`,
     indent(
       lines(
         `const accepted = C.${input.name}.create(input);`,
@@ -110,10 +115,9 @@ export function requestSource(
         `const encoded = C.${input.name}.toWire(accepted.value.value, "http");`,
         'if (encoded.isErr()) throw new C.ContractDefect("Invalid request input", encoded.error);',
         "const wire = encoded.value as Record<string, unknown>;",
-        `let path = ${quote(http.path)};`,
         placementStatements(input, http),
         bodyStatements(types, input, http),
-        `return new Request(url, { method: ${quote(http.method)}, headers, ${hasBody ? "...(body === undefined ? {} : { body }), " : ""}signal });`,
+        `return Ok(new Request(url, { method: ${quote(http.method)}, headers, ${hasBody ? "...(body === undefined ? {} : { body }), " : ""}signal }));`,
       ),
     ),
     "}",

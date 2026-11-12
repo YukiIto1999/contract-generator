@@ -101,14 +101,22 @@ export class PeerPool {
   /** Peers started so far */
   readonly peers: RawPeer[] = [];
 
+  /** Raw peer serving fixed bytes
+   * @param bytes - Complete hand-written response
+   * @returns Running peer that records the requests it received
+   */
+  async start(bytes: Buffer): Promise<RawPeer> {
+    const peer = await startRawPeer(bytes);
+    this.peers.push(peer);
+    return peer;
+  }
+
   /** Raw peer origin serving fixed bytes
    * @param bytes - Complete hand-written response
    * @returns Peer origin
    */
   async origin(bytes: Buffer): Promise<string> {
-    const peer = await startRawPeer(bytes);
-    this.peers.push(peer);
-    return peer.origin;
+    return (await this.start(bytes)).origin;
   }
 
   /** Closing every peer started through the pool */

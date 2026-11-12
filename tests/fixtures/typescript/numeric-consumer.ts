@@ -11,7 +11,12 @@ import {
   type NotFound,
   type RequestBodyReader,
 } from "./provider.js";
-import { createHttpClient, createFetchTransport, createIpcClient } from "./client.js";
+import {
+  createHttpClient,
+  createFetchTransport,
+  createIpcClient,
+  type HttpTransport,
+} from "./client.js";
 import { deferEffect, type Effect } from "./effect.js";
 import { runChecks, type Check } from "./check.js";
 
@@ -183,6 +188,13 @@ function handlersOf(select: () => Selected): Handlers<unknown> {
         Ok({
           case: "Relayed" as const,
           value: payload(`${input.pathId}|${input.token}|${input.note}`),
+        }),
+      ),
+    archive: (input) =>
+      effect(() =>
+        Ok({
+          case: "Archived" as const,
+          value: payload(`${input.tenant}|${input.item}|${input.token}`),
         }),
       ),
     upload: (input) =>
@@ -445,6 +457,89 @@ function accepted<T>(result: Result<C.Accepted<T>, readonly C.Violation[]>): T {
 }
 
 /**
+ * Real HTTP guarantees of path and header values at the wire boundary
+ * @param base - Service origin of the served provider
+ * @returns Named checks
+ */
+function archiveChecks(base: string): readonly Check[] {
+  const real = createFetchTransport(fetch);
+  const sent: string[] = [];
+  const transport: HttpTransport = {
+    request: (request, context) => {
+      sent.push(request.url);
+      return new URL(request.url).origin === new URL(base).origin
+        ? real.request(request, context)
+        : new AsyncResult<Response, C.CommunicationFailure>(
+            Promise.resolve(
+              Err<C.CommunicationFailure>({
+                kind: "communication",
+                message: "off the service origin",
+              }),
+            ),
+          );
+    },
+    readBody: real.readBody,
+  };
+  const client = createHttpClient({ baseUrl: base, transport });
+  const signal = new AbortController().signal;
+  const archive = async (
+    tenant: string,
+    item: string,
+    token = "t",
+  ): Promise<Result<C.ArchiveSuccess, C.ArchiveRejection | C.CommunicationFailure>> => {
+    sent.length = 0;
+    const input = accepted(C.ArchiveInput.create({ tenant, item, token }));
+    return await client.archive(input)(undefined, signal, Infinity);
+  };
+  return [
+    [
+      "path-and-header-values-reach-the-service-origin-exactly",
+      async () => {
+        const result = await archive("acme", "a/b c.d", "x\ty");
+        assert.deepEqual(sent, [`${base}/acme/a%2Fb%20c.d/archive`]);
+        assert.equal(result.isOk() && result.value.value.value, "acme|a/b c.d|x\ty");
+      },
+    ],
+    [
+      "empty-and-dot-path-values-are-communication-failures-before-the-transport",
+      async () => {
+        const unsafe = [
+          ["", "attacker.invalid"],
+          ["", ""],
+          [".", "x"],
+          ["x", ".."],
+          ["..", ".."],
+          ["acme", ""],
+        ] as const;
+        for (const [tenant, item] of unsafe) {
+          const failed = await archive(tenant, item);
+          assert.equal(
+            failed.isErr() && "kind" in failed.error && failed.error.kind,
+            "communication",
+            `${tenant}|${item}`,
+          );
+          assert.deepEqual(sent, [], `${tenant}|${item}`);
+        }
+      },
+    ],
+    [
+      "header-values-with-control-framing-are-communication-failures-before-the-transport",
+      async () => {
+        for (const token of ["a\r\nInjected: 1", "a\nb", "a\rb", "a\u0000b"]) {
+          const failed = await archive("acme", "x", token);
+          assert.equal(
+            failed.isErr() && "kind" in failed.error && failed.error.kind,
+            "communication",
+            JSON.stringify(token),
+          );
+          assert.deepEqual(sent, [], JSON.stringify(token));
+        }
+      },
+    ],
+  ];
+}
+
+/**
  * Every named numeric, selector and placement guarantee
  * @param write - Sink of one JSON result line per check
  * @returns Completion after every check reported and the host closed
@@ -464,7 +559,11 @@ export async function runNumericChecks(write: (line: string) => void): Promise<v
     if (!address || typeof address === "string") throw new Error("Missing server address");
     const base = `http://127.0.0.1:${address.port}`;
     await runChecks(
-      [...numericChecks(), ...operationChecks(base, provider, selection, faults)],
+      [
+        ...numericChecks(),
+        ...operationChecks(base, provider, selection, faults),
+        ...archiveChecks(base),
+      ],
       write,
     );
   } finally {

@@ -2,7 +2,7 @@ import type { HttpParameter, HttpResult } from "../../model/binding-model.js";
 import type { ObjectType, Operation } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
 import { inputOf } from "./acceptance.js";
-import { binaryOutcome, decodeOutcome, mismatch } from "./client-outcome.js";
+import { binaryOutcome, communicationReturn, decodeOutcome, mismatch } from "./client-outcome.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { binaryBody, requestShape, type RequestShape } from "./http-request-codec.js";
@@ -21,15 +21,16 @@ function contentType(mediaType: string): string {
 /** Placement of one parameter that travels outside the body
  * @param input - Operation input object
  * @param parameter - Placement
+ * @param refusal - Return statement that reports a parameter text without an HTTP wire form
  * @returns Statements that place the parameter text
  */
-function parameterStatement(input: ObjectType, parameter: HttpParameter): string {
+function parameterStatement(input: ObjectType, parameter: HttpParameter, refusal: string): string {
   const field = input.fields.find((candidate) => candidate.name === parameter.parameter)!;
   const variable = `p${pascal(field.name)}`;
   const place = {
-    path: `path = path.Replace(${quote("{" + parameter.wireName + "}")}, Uri.EscapeDataString(text), StringComparison.Ordinal);`,
+    path: `if (!HttpWire.PathSegment(text, out var segment)) ${refusal} path = path.Replace(${quote("{" + parameter.wireName + "}")}, segment, StringComparison.Ordinal);`,
     query: `query.Add(${quote(parameter.wireName + "=")} + Uri.EscapeDataString(text));`,
-    header: `if (!request.Headers.TryAddWithoutValidation(${quote(parameter.wireName)}, text)) throw new InvalidOperationException("Invalid request header mapping");`,
+    header: `if (!HttpWire.HeaderText(text)) ${refusal} if (!request.Headers.TryAddWithoutValidation(${quote(parameter.wireName)}, text)) throw new InvalidOperationException("Invalid request header mapping");`,
   }[parameter.location];
   return lines(
     `if (inputDocument.RootElement.TryGetProperty(${quote(field.wireName)}, out var ${variable})) {`,
@@ -177,13 +178,16 @@ function requestStatements(c: CSharpContext, operation: Operation, shape: Reques
     shape === "binary"
       ? `${opName(operation, "HttpRequestCodec")}.EncodeParameters(input)`
       : `${c.codec(input.id)}.Encode(input, "http")`;
+  const refusal = communicationReturn(operation, "request-wire-form");
   return lines(
     requireValue("string", encoded, "inputJson"),
     `string path = ${quote(http.path)}; var query = new List<string>();`,
     `using var request = new HttpRequestMessage(); request.Method = new HttpMethod(${quote(http.method)});`,
     "using var inputDocument = JsonDocument.Parse(inputJson);",
-    ...http.parameters.map((parameter) => parameterStatement(input, parameter)),
-    `request.RequestUri = new Uri(requirements.ServiceOrigin, path + (query.Count == 0 ? "" : "?" + string.Join("&", query)));`,
+    ...http.parameters.map((parameter) => parameterStatement(input, parameter, refusal)),
+    `var target = new Uri(requirements.ServiceOrigin, path + (query.Count == 0 ? "" : "?" + string.Join("&", query)));`,
+    `if (!HttpWire.SameOrigin(requirements.ServiceOrigin, target)) ${refusal}`,
+    "request.RequestUri = target;",
     "request.Options.Set(DeadlineOption, deadline);",
     requestBody(c, operation, shape),
   );

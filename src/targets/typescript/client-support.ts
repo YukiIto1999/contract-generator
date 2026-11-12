@@ -153,16 +153,53 @@ function wireText(wire: Record<string, unknown>, member: string): string | undef
 }
 
 /**
+ * Failure of a request value that has no HTTP wire form
+ * @returns Expected communication failure
+ */
+function noWireForm(): Result<never, C.CommunicationFailure> {
+  return Err<C.CommunicationFailure>({ kind: "communication", message: "A request value has no HTTP wire form" });
+}
+
+/**
+ * Request URL of a route template on the service origin
+ * @param baseUrl - Service origin
+ * @param template - Absolute route template
+ * @param wire - Wire representation of the input
+ * @param placements - Placeholder and wire member of every path parameter
+ * @returns URL, absent when a path value cannot fill one segment or the URL would leave the origin
+ * @throws {@link C.ContractDefect} Representation without a JSON document
+ */
+function routeUrl(baseUrl: string, template: string, wire: Record<string, unknown>, placements: readonly (readonly [string, string])[]): URL | undefined {
+  let path = template;
+  for (const [placeholder, member] of placements) {
+    const text = wireText(wire, member)!;
+    if (text === "" || text === "." || text === "..") return undefined;
+    path = path.replace(placeholder, encodeURIComponent(text));
+  }
+  const origin = new URL(baseUrl);
+  const url = new URL(path, origin);
+  return url.protocol === origin.protocol && url.host === origin.host ? url : undefined;
+}
+
+/**
  * Placement of a present parameter value into query parameters or headers
  * @param target - Query parameters or headers
  * @param name - Parameter name on the wire
  * @param wire - Wire representation of the input
  * @param member - Wire member name of the parameter
+ * @returns Whether the target accepted the value, false when it has no wire form there
  * @throws {@link C.ContractDefect} Representation without a JSON document
  */
-function placeValue(target: { append(name: string, value: string): void }, name: string, wire: Record<string, unknown>, member: string): void {
+function placeValue(target: { append(name: string, value: string): void }, name: string, wire: Record<string, unknown>, member: string): boolean {
   const text = wireText(wire, member);
-  if (text !== undefined) target.append(name, text);
+  if (text === undefined) return true;
+  try {
+    target.append(name, text);
+    return true;
+  } catch (cause) {
+    if (cause instanceof TypeError) return false;
+    throw cause;
+  }
 }
 `;
 

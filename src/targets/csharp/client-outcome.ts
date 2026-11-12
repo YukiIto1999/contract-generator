@@ -16,7 +16,7 @@ function resultType(operation: Operation): string {
  * @param reason - Stable host-visible reason
  * @returns Return statement
  */
-function communicationReturn(operation: Operation, reason: string): string {
+export function communicationReturn(operation: Operation, reason: string): string {
   return `return new ${resultType(operation)}.Failed(new ${opName(operation, "Failure")}.Communication(new(${quote(reason)})));`;
 }
 

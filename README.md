@@ -103,6 +103,12 @@ The built-in constraints, `@doc`, `@encode`, `@discriminator` on models, and `@d
 Write a default with `@providerDefault`, because a built-in `= value` default is rejected.
 Write a header selector key that is not a plain identifier in backticks, as in ``#{`x-kind`: "a"}``.
 
+A route is an absolute path of nonempty segments that are neither `.` nor `..`.
+A percent-encoded spelling of either dot segment is rejected too.
+An empty segment is allowed only as a trailing slash, and a placeholder fills a whole segment.
+A generated client never sends a request outside the configured origin.
+A path value that is empty, `.`, or `..`, or a header value with a control character other than a horizontal tab, has no wire form, so the call returns a communication failure before anything is sent.
+
 ## Generating
 
 Name the emitter by its checkout path and key its options by the package name.

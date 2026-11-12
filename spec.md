@@ -75,6 +75,9 @@ HTTPはmethod・path・要求の配置と、結果ごとのstatus・media type�
 bytesのpayloadは、media typeがJSONのときbindingのencodingによるJSON文字列で運び、それ以外のときbytesのまま運ぶ。
 nullableな引数はbodyにだけ置け、path・query・headerへの配置は拒否する。
 path・query・headerへ配置した引数と同じ名前のbodyの項目は、未知の項目として扱い、配置した値を上書きしない。
+routeは、空でも`.`・`..`(百分率符号化した綴りを含む)でもないsegmentからなり、placeholderはsegmentの全体を占める。
+path・headerへ配置する値が、一つのsegmentで運べない空・`.`・`..`であるか、headerの値として運べない水平tab以外の制御文字を含むとき、その値は有効な正規値でもwireの形を持たないので、送信の前に通信失敗とする。
+生成したclientは、設定したoriginの外へ要求を送らない。
 応答の読取りと検証が終わるまで成功を返さない。
 
 IPCはhostが供給するtransport上の要求と応答として定義し、操作名と結果tagで識別する。
@@ -121,7 +124,7 @@ Rust の最低サポート版は `src/targets/rust/dependencies.ts` の `rustMin
 | G8  | 同じbodyの201・202、204、空binary、未宣言200、誤ったmedia type・selector                                                              | 成功case・拒否・欠陥を識別情報に従って区別する                                                                                     | body順の試行と2xx範囲による成功判定                                                  |
 | G9  | 宣言した拒否、502・503・504の宣言一致と不一致、本文の途中切断                                                                         | 既存の失敗・欠陥の経路に別々の結果を返す                                                                                           | 全例外の同一化と中継者の本文の誤分類                                                 |
 | G10 | 開始前の取消、通信中の取消、完了後の取消、hostの期限                                                                                  | 所有する層に終了理由を残し、完了済みの結果を保持する                                                                               | 独自timeoutと終了理由の上書き                                                        |
-| G11 | 違反する宣言、追加結果のbinding欠落、重なるselector、未解釈の注釈                                                                     | 宣言位置付きの生成診断を返し、直前の成功した出力を保つ                                                                             | 部分生成の成功扱いと意味の黙示的な脱落                                               |
+| G11 | 違反する宣言、追加結果のbinding欠落、重なるselector、未解釈の注釈、空・dot・部分placeholderのsegmentを持つroute                       | 宣言位置付きの生成診断を返し、直前の成功した出力を保つ                                                                             | 部分生成の成功扱いと意味の黙示的な脱落                                               |
 | G12 | 異なる作業pathと宣言の列挙順から同じ契約を生成する                                                                                    | 全生成ファイルのbytesが一致する                                                                                                    | 絶対パス・時刻・探索順への依存                                                       |
 | G13 | 型・codecだけを参照する三言語のプログラム                                                                                             | HTTP・Effect runtimeなしに構築・decode・encodeを実行できる                                                                         | 依存単位の分離不足                                                                   |
 | G14 | 実HTTP接続と別processのIPC接続                                                                                                        | 生成した両端で要求からhandlerの結果までを往復できる                                                                                | 型とstubだけで通信できたとみなす判定                                                 |
@@ -131,6 +134,7 @@ Rust の最低サポート版は `src/targets/rust/dependencies.ts` の `rustMin
 | G21 | 全ての行末文字、XMLで許されない制御文字、双方向制御文字、escapeに見える字句、引用符、コードブロックを含む説明文・項目名・tag・literal | 三言語の生成物をbuildまたは型検査でき、説明は文書の文字として残り、literalは宣言した値だけを受理し、説明に含めたcodeは実行されない | 行末文字・制御文字による文書外へのcodeの混入、literalの字句の化け、説明のdoctest実行 |
 | G18 | 最低サポート版と同じ rustc・Cargo で三つの固定契約を生成する                                                                          | 全 Rust 依存単位を build し、公開構築・codec の受理と拒否を実行できる                                                              | 宣言した最低版を別の compiler で検証したとみなす判定                                 |
 | G19 | Linux の実 Wry webview から Tauri command を通して生成済みの両端を呼ぶ                                                                | 成功・宣言した拒否・不正入力の拒否と状態不変・準備前と停止後の拒否・進行中の取消後の回収を観測し、実 event loop を正常終了する     | mock Runtime や frame の往復だけを実 Tauri の接続とみなす判定                        |
+| G20 | 先頭がplaceholderのrouteで空・`.`・`..`を値にしたpath引数と、制御文字を含むheader引数                                                 | 三言語のclientが送信の前に通信失敗を返し、通常の値は設定したoriginへ同じ要求として送る                                             | 設定したoriginの外やdot segmentの解決先への送信と、headerと要求のframingの注入       |
 
 PBTはこの実装の不変条件の検証に用いる。
 業務oracleの生成、MBTと形式手法の体系化はこのライブラリの責務に含めない。

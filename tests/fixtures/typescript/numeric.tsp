@@ -89,6 +89,15 @@ op relay(pathId: string, token: string, note: string): Relayed;
 @@httpParameter(relay, "token", "header", "X-Token");
 @@httpResult(relay, "relayed", 200, "application/json");
 
+@outcomes union Archived { archived: Payload }
+op archive(tenant: string, item: string, token: string): Archived;
+@@publish(archive, #["http"]);
+@@httpBinding(archive, "GET", "/{tenant}/{item}/archive", "-");
+@@httpParameter(archive, "tenant", "path", "tenant");
+@@httpParameter(archive, "item", "path", "item");
+@@httpParameter(archive, "token", "header", "X-Token");
+@@httpResult(archive, "archived", 200, "application/json");
+
 @outcomes union InlineOutcomes { loaded: bytes }
 op inline(): InlineOutcomes;
 @@publish(inline, #["http"]);

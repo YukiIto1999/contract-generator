@@ -103,6 +103,12 @@ op submit(id: RequestId, label: ShortLabel, @providerDefault(3) limit?: int32): 
 既定値は `@providerDefault` で書き、組み込みの `= value` による既定値は拒否される。
 単純な識別子でない header の key は、``#{`x-kind`: "a"}`` のように backtick で囲む。
 
+経路は、空でなく、`.` でも `..` でもない segment からなる絶対 path にする。
+`.` と `..` は、百分率符号化した綴りも拒否する。
+空の segment は、末尾の slash に限って許し、placeholder は segment の全体を占める。
+生成した client は、設定した origin の外へ要求を送らない。
+path に置く値が空、`.`、`..` のいずれかであるとき、または header に置く値が水平 tab 以外の制御文字を含むとき、その値には wire の形がないので、送信する前に通信の失敗を返す。
+
 ## 生成
 
 emitter は checkout した path で指定し、option は package 名を key にして書く。

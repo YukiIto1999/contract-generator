@@ -83,6 +83,81 @@ native("sends a header value that has a wire form unchanged", async () => {
   expect(header((await received(observed)).head, "x-note")).toBe("fine value");
 });
 
+/** Path value pairs that no single URL segment carries unchanged; the first one would move the request to another host */
+const unsafePaths = [
+  ["", "127.0.0.2"],
+  ["", ""],
+  [".", "x"],
+  ["x", ".."],
+  ["..", ".."],
+  ["acme", ""],
+] as const;
+
+/** Header texts with a control character other than horizontal tab */
+const framingLabels = ["a\r\nInjected: 1", "a\nb", "a\rb", "a\u0000b", "a\u007fb"];
+
+/** Archive call over real HTTP
+ * @param origin - Service origin
+ * @param values - Tenant, item and label texts
+ * @returns Driver observation and the URLs that the generated client handed to the host transport
+ */
+function archive(
+  origin: string,
+  values: Readonly<Record<string, string>>,
+): { readonly result: Record<string, unknown>; readonly urls: string[] } {
+  const run = drive(
+    built,
+    JSON.stringify({
+      binding: "http",
+      origin,
+      operation: "archive",
+      parameters: JSON.stringify(values),
+    }),
+  );
+  const urls = run.stderr.split("\n").flatMap((line) => {
+    const sent = line.startsWith("{") ? field(JSON.parse(line), "sent") : undefined;
+    return sent === undefined ? [] : [String(field(sent, "url"))];
+  });
+  return { result: JSON.parse(run.stdout) as Record<string, unknown>, urls };
+}
+
+native("sends ordinary path and header values to the configured origin exactly", async () => {
+  const observed = await peer(built.base, respond(204, {}));
+  const { result, urls } = archive(observed.origin, {
+    tenant: "acme",
+    item: "a/b c.d",
+    label: "x\ty",
+  });
+  expect(result).toMatchObject({ kind: "success", outcome: "Archived", void: true });
+  expect(urls).toEqual([`${observed.origin}/acme/a%2Fb%20c.d/archive`]);
+  const request = await received(observed);
+  expect(request.head[0]).toBe("GET /acme/a%2Fb%20c.d/archive HTTP/1.1");
+  expect(header(request.head, "x-label")).toBe("x\ty");
+  expect(header(request.head, "host")).toBe(new URL(observed.origin).host);
+});
+
+native(
+  "returns an empty or dot path value and a framing header value as a communication failure before any request",
+  async () => {
+    const quiet = await peer(built.base, respond(204, {}));
+    const refused = [
+      ...unsafePaths.map(([tenant, item]) => ({ tenant, item, label: "l" })),
+      ...framingLabels.map((label) => ({ tenant: "acme", item: "x", label })),
+    ];
+    for (const values of refused) {
+      const { result, urls } = archive(quiet.origin, values);
+      expect(result, JSON.stringify(values)).toEqual({ kind: "communication" });
+      expect(urls, JSON.stringify(values)).toEqual([]);
+    }
+    const fine = archive(quiet.origin, { tenant: "acme", item: "x", label: "l" });
+    expect(fine.result).toMatchObject({ kind: "success", outcome: "Archived" });
+    await received(quiet);
+    expect(
+      quiet.stdout.lines.filter((line) => field(line.json, "connection") !== undefined),
+    ).toHaveLength(1);
+  },
+);
+
 native(
   "retains the source spelling of numeric scalars and rejects what their storage cannot hold",
   () => {

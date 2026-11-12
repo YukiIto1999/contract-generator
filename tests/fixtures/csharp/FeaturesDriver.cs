@@ -263,6 +263,13 @@ internal static class FeaturesDriver
                 success => writer.WriteString("case", "Pong"),
                 failure => WriteFailure(writer, failure is PingFailure.Communication communication ? communication.Failure.Reason : null, failure is PingFailure.InvalidInput invalid ? invalid.Failure : null));
         }
+        else if (operation == "archive")
+        {
+            var input = Required(ArchiveInput.Create(request.GetProperty("item").GetString()!, request.GetProperty("tenant").GetString()!, request.GetProperty("token").GetString()!));
+            WriteExit(writer, await consumer.Run(ContractClient.ArchiveHttp(input, null), CancellationToken.None),
+                success => { writer.WriteString("case", "Archived"); writer.WriteString("value", ((ArchiveSuccess.Archived)success).Value.Value); },
+                failure => WriteFailure(writer, failure is ArchiveFailure.Communication communication ? communication.Failure.Reason : null, failure is ArchiveFailure.InvalidInput invalid ? invalid.Failure : null));
+        }
         else throw new InvalidOperationException("Unknown fixture operation");
         if (useLoopback)
         {
@@ -451,6 +458,18 @@ internal sealed class FeatureHandlers : IContractHandlers
         Seen = "{}";
         return new EffectContext<NoRequirements, PingRejection>().Succeed(FeaturesDriver.Required(PingSuccess.Pong.Create()));
     }
+
+    /// <summary>Echo of the path and header values that the provider extracted</summary>
+    /// <param name="input">Provider-accepted input</param>
+    /// <param name="deadline">Host-owned deadline metadata</param>
+    /// <returns>Fixed archived payload</returns>
+    public Effect<NoRequirements, ArchiveRejection, ArchiveSuccess> Archive(ArchiveInput input, DateTimeOffset? deadline)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); writer.WriteString("tenant", input.Tenant); writer.WriteString("item", input.Item); writer.WriteString("token", input.Token); writer.WriteEndObject(); }
+        Seen = Encoding.UTF8.GetString(stream.ToArray());
+        return new EffectContext<NoRequirements, ArchiveRejection>().Succeed(FeaturesDriver.Required(ArchiveSuccess.Archived.Create(FeaturesDriver.Required(Payload.Create("archived")))));
+    }
 }
 
 /// <summary>In-memory transport between the generated client and the generated provider that records both messages</summary>
@@ -482,6 +501,7 @@ internal sealed class LoopbackHandler : HttpMessageHandler
             writer.WriteStartObject();
             writer.WriteStartObject("request");
             writer.WriteString("method", request.Method.Method);
+            writer.WriteString("origin", request.RequestUri!.GetLeftPart(UriPartial.Authority));
             writer.WriteString("target", request.RequestUri!.PathAndQuery);
             if (request.Headers.TryGetValues("X-Token", out var token)) writer.WriteString("token", string.Join(",", token));
             writer.WriteString("contentType", request.Content?.Headers.ContentType?.ToString());
