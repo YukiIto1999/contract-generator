@@ -66,6 +66,18 @@ function driverManifest(prefix: string): string {
   return `[package]\nname = "${prefix}-fixture-driver"\nversion = "0.0.0"\nedition = "2024"\n\n[workspace]\n\n[dependencies]\n${own}\nserde_json = { version = "=${d.serde_json}", features = ["arbitrary_precision"] }\nreqwest = { version = "=${d.reqwest}", default-features = false, features = ["rustls"] }\naxum = "=${d.axum}"\ntokio = { version = "=${d.tokio}", features = ["full"] }\n`;
 }
 
+/** Generated Rust product of a contract
+ * @param model - Canonical profile output
+ * @param options - Target integration options
+ * @returns Generated product files
+ * @throws Error when the generator refuses the contract
+ */
+function generated(model: ContractModel, options: EmissionOptions): readonly GeneratedFile[] {
+  const result = renderRust(model, options);
+  if (result.isErr()) throw new Error(JSON.stringify(result.error));
+  return result.value;
+}
+
 /** Generated product plus the literal native consumer crates of one fixed contract
  * @param fixture - Fixed contract name
  * @param model - Canonical profile output
@@ -78,8 +90,6 @@ export function rustFixtureFiles(
   model: ContractModel,
   options: EmissionOptions,
 ): readonly GeneratedFile[] {
-  const result = renderRust(model, options);
-  if (result.isErr()) throw new Error(JSON.stringify(result.error));
   const prefix = options.rustCratePrefix;
   const list = probes[fixture];
   const construction =
@@ -92,7 +102,7 @@ export function rustFixtureFiles(
         ]
       : [];
   return [
-    ...result.value,
+    ...generated(model, options),
     { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(prefix, list) },
     { path: "rust/fixture-codec/src/main.rs", content: source("common/codec_main.rs") },
     { path: "rust/fixture-codec/src/codec.rs", content: source(`${fixture}/codec.rs`) },
@@ -105,5 +115,23 @@ export function rustFixtureFiles(
     { path: "rust/fixture-driver/src/main.rs", content: source("common/driver_main.rs") },
     { path: "rust/fixture-driver/src/host.rs", content: source("common/host.rs") },
     { path: "rust/fixture-driver/src/contract.rs", content: source(`${fixture}/contract.rs`) },
+  ];
+}
+
+/** Generated product plus the types-only codec crate of the source-data contract
+ * @param model - Canonical profile output
+ * @param options - Target integration options
+ * @returns Generated product files and the test-only native codec consumer
+ * @throws Error when the generator refuses the contract, which is itself a failure of the fixture
+ */
+export function rustSourceDataFiles(
+  model: ContractModel,
+  options: EmissionOptions,
+): readonly GeneratedFile[] {
+  return [
+    ...generated(model, options),
+    { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(options.rustCratePrefix, []) },
+    { path: "rust/fixture-codec/src/main.rs", content: source("common/codec_main.rs") },
+    { path: "rust/fixture-codec/src/codec.rs", content: source("source-data/codec.rs") },
   ];
 }

@@ -13,7 +13,7 @@ function declaration(type: EnumType | LiteralType): string {
   const body =
     type.kind === "literal"
       ? `pub struct ${type.name}(());`
-      : `pub enum ${type.name} { ${type.members.map((member) => `/// Exact ${literalJson(member.value)} literal\n${member.name},`).join("\n")} }`;
+      : `pub enum ${type.name} { ${type.members.map((member) => `${doc("", `Exact ${literalJson(member.value)} literal`)}\n${member.name},`).join("\n")} }`;
   return `${head}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 ${body}

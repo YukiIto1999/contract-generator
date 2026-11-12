@@ -95,7 +95,7 @@ export function acceptedInputs(native: Native, line: string): string[] {
  * @throws Error when the driver ends abnormally
  */
 export function decode(
-  native: Native,
+  native: Pick<Native, "codec" | "root">,
   type: string,
   payload: string,
   binding: "http" | "ipc" = "ipc",

@@ -1,7 +1,7 @@
 import type { ObjectType } from "../../model/contract-model.js";
 import { publicCodec } from "./codec-public.js";
 import type { RustContext } from "./context.js";
-import { doc, key, snake } from "./naming.js";
+import { doc, docItem, key, snake } from "./naming.js";
 import { decodeField, encodeMember, fieldChecks } from "./object-members.js";
 import { fieldType } from "./storage.js";
 
@@ -39,9 +39,11 @@ function constructor(ctx: RustContext, type: ObjectType): string {
       `${doc(field.description, `Accepted ${field.wireName} presence state`)}\n${snake(field.name)}: ${fieldType(ctx, field)},`,
   );
   const params = type.fields.map((field) => `field_${snake(field.name)}: ${fieldType(ctx, field)}`);
-  const docs = type.fields.map(
-    (field) =>
-      `/// - field_${snake(field.name)}: ${field.description || `owned ${field.wireName} presence state`}`,
+  const docs = type.fields.map((field) =>
+    docItem(
+      `field_${snake(field.name)}`,
+      field.description || `owned ${field.wireName} presence state`,
+    ),
   );
   const some = type.fields.map((field) => `, Some(field_${snake(field.name)})`).join("");
   const contract = [

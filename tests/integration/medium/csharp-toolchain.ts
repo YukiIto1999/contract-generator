@@ -210,9 +210,10 @@ export interface BuiltContract {
 }
 
 /** Provisioned fixture of one contract with its named driver projects built
- * @param source - Checkout-relative TypeSpec source path
+ * @param source - Checkout-relative TypeSpec source path, which also resolves the imports of an inline source text
  * @param namespace - Selected public contract
  * @param projects - Driver project files to build
+ * @param text - Contract source text; the checkout file is read when omitted
  * @returns Fixture and one build per project; throws when a build fails
  * @throws {@link Error} A contract that does not render or a driver that does not build
  */
@@ -220,8 +221,9 @@ export async function buildContract(
   source: string,
   namespace: string,
   projects: readonly string[],
+  text?: string,
 ): Promise<BuiltContract> {
-  const rendered = renderCSharp(await contractModel(source, namespace), {
+  const rendered = renderCSharp(await contractModel(source, namespace, text), {
     ...options,
     csharpNamespace: namespace,
   });
