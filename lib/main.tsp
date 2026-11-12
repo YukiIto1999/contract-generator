@@ -33,7 +33,7 @@ extern dec publish(target: Operation, bindings: valueof ("http" | "ipc")[]);
  * HTTP route and request body ownership
  * @param target Operation receiving the HTTP route
  * @param method HTTP request method
- * @param path Absolute route template
+ * @param path Absolute route template of nonempty segments without dot segments, where each placeholder fills a whole segment
  * @param body Parameter name or * for remaining parameters or - for no body
  */
 extern dec httpBinding(target: Operation, method: valueof string, path: valueof string, body?: valueof string);

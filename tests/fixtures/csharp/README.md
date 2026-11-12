@@ -154,7 +154,8 @@ The no-default download operation reuses `DownloadInput` rather than generating 
 
 `FeaturesDriver.dll` reads JSON lines of three kinds.
 `{"type":...,"payload":...,"binding":...}` is the codec protocol for `Numbers`, `ExactInteger`, `ExactAmount`, `ExactOffset`, `NonemptyCustomer`, `Kinds` and `MergeRequest`, whose payload carries the placed parameters text and the request body text of the `merge` operation.
-`{"operation":"choose"|"route"|"upload"|"image"|"ping",...}` runs the generated client; without `url` it dispatches into the generated provider through an in-memory handler that records the request the client sent and the response the provider produced, and with `url` it talks to a raw TCP peer.
+`{"operation":"choose"|"route"|"upload"|"image"|"ping"|"archive",...}` runs the generated client; without `url` it dispatches into the generated provider through an in-memory handler that records the request the client sent (method, origin, target, `X-Token` and body) and the response the provider produced, and with `url` it talks to a raw TCP peer.
+The `archive` operation places `tenant` and `item` in a route that starts with a placeholder and `token` in a header, so its scenarios observe the empty and dot path values and the framing header values that the client must refuse before any send.
 `{"operation":"provider","method":...,"target":...,"headers":...,"contentType":...,"body":<base64>}` hands a hand-written request to `ContractProvider.DispatchHttp`.
 `{"operation":"providerIpc","command":...,"parameters":...}` hands a hand-written command to `ContractProvider.DispatchIpc`, and `{"operation":"direct","payload":...}` calls the generated provider directly for the defaults operation.
 The `defaults` handler reports the effective branch through the public properties that a handler reads.

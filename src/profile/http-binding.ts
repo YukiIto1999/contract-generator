@@ -11,6 +11,9 @@ const methodToken = /^[!#$%&'*+.^_`|~0-9A-Z-]+$/;
 /** Placeholder of a route template with its capturing name */
 const placeholderPattern = /\{([^{}]+)\}/g;
 
+/** Path segment that a URL parser resolves to the current or parent segment, including percent-encoded dots */
+const dotSegment = /^(?:\.|%2e)(?:\.|%2e)?$/i;
+
 /**
  * Complete HTTP route, placement and selector interpretation
  * @param context - Binding context of the operation
@@ -47,7 +50,20 @@ export function compileHttp(context: BindingContext): HttpBinding | undefined {
 }
 
 /**
- * Route template shape: absolute, without query, fragment, whitespace or malformed placeholders
+ * Whether a route segment cannot be carried as one literal or one whole placeholder
+ * @param segment - Route segment between two slashes
+ * @param last - Whether the segment ends the route, where an empty segment is a trailing slash
+ * @returns True for an empty inner segment, a dot segment, or a partial or malformed placeholder
+ */
+function unsafeSegment(segment: string, last: boolean): boolean {
+  if (segment === "") return !last;
+  if (dotSegment.test(segment)) return true;
+  return /[{}]/.test(segment) && segment.match(placeholderPattern)?.[0] !== segment;
+}
+
+/**
+ * Route template shape: absolute, one URL path of nonempty segments, without query, fragment,
+ * whitespace, backslash, dot segments or placeholders that do not fill a whole segment
  * @param context - Binding context of the operation
  * @param target - Route declaration target
  * @param path - Declared route template
@@ -55,13 +71,16 @@ export function compileHttp(context: BindingContext): HttpBinding | undefined {
 function checkPath(context: BindingContext, target: DiagnosticTarget, path: string): void {
   if (
     !path.startsWith("/") ||
-    /[?#\s]/.test(path) ||
-    /[{}]/.test(path.replace(placeholderPattern, ""))
+    /[?#\s\\]/.test(path) ||
+    path
+      .slice(1)
+      .split("/")
+      .some((segment, index, segments) => unsafeSegment(segment, index === segments.length - 1))
   )
     context.issue(
       "invalid-http-path",
       target,
-      "The route must be an absolute path template without query or fragment or malformed placeholders",
+      "The route must be an absolute path template of nonempty, non-dot segments, with whole-segment placeholders and without query, fragment or backslash",
     );
 }
 

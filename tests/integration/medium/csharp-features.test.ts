@@ -7,6 +7,10 @@ import {
   expectParameterMapping,
   expectSameStatusSelection,
 } from "./csharp-features-loopback.js";
+import {
+  expectOrdinaryValuesOnTheConfiguredOrigin,
+  expectUnsafeValuesNeverSent,
+} from "./csharp-features-wire.js";
 import { chooseResponses, pingResponses, type Response } from "./csharp-features-client-cases.js";
 import { providerScenarios } from "./csharp-features-provider-cases.js";
 import { PeerPool } from "./csharp-peers.js";
@@ -87,6 +91,15 @@ nativeTest(
 nativeTest(
   "carries bytes unchanged in both directions and keeps an empty body distinct from an absent one (G8)",
   () => expectBytesRoundTrip(features.driver("FeaturesDriver")),
+);
+
+nativeTest(
+  "sends ordinary path and header values to the configured origin exactly and keeps a horizontal tab (G20)",
+  () => expectOrdinaryValuesOnTheConfiguredOrigin(features.driver("FeaturesDriver"), peers),
+);
+nativeTest(
+  "returns an empty or dot path value and a framing header value as a communication failure before any send (G20)",
+  () => expectUnsafeValuesNeverSent(features.driver("FeaturesDriver"), peers),
 );
 
 nativeTest(

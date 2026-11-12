@@ -83,6 +83,7 @@ impl client::HttpTransport for HostHttp {
     }
 
     async fn send(&self, request: reqwest::Request, token: &CancellationToken, deadline: Option<Instant>) -> Result<client::HttpResponse, CommunicationFailure> {
+        eprintln!("{}", json!({"sent": {"method": request.method().as_str(), "url": request.url().as_str()}}));
         let Some(deadline) = deadline else {
             return client::HttpTransport::send(&self.0, request, token, None).await;
         };

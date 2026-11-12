@@ -125,6 +125,15 @@ op merge(id: string, label: string): Merged;
 @@httpParameter(merge, "id", "path", "id");
 @@httpResult(merge, "done", 200, "application/json");
 
+@outcomes union Archived { archived: Payload }
+op archive(tenant: string, item: string, token: string): Archived;
+@@publish(archive, #["http"]);
+@@httpBinding(archive, "GET", "/{tenant}/{item}/archive", "-");
+@@httpParameter(archive, "tenant", "path", "tenant");
+@@httpParameter(archive, "item", "path", "item");
+@@httpParameter(archive, "token", "header", "X-Token");
+@@httpResult(archive, "archived", 200, "application/json");
+
 @outcomes union Pinged { pong: void }
 op ping(): Pinged;
 @@publish(ping, #["http"]);

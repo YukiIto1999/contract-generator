@@ -40,6 +40,29 @@ internal static partial class HttpWire
         using var document = JsonDocument.Parse(json);
         return document.RootElement.ValueKind == JsonValueKind.String ? document.RootElement.GetString()! : document.RootElement.GetRawText();
     }
+    /// <summary>Path segment that carries a parameter text unchanged</summary>
+    /// <param name="text">Parameter text</param>
+    /// <param name="segment">Percent-encoded segment</param>
+    /// <returns>Whether one segment can carry the text, which excludes the empty text and the dot segments</returns>
+    internal static bool PathSegment(string text, out string segment)
+    {
+        segment = text is "" or "." or ".." ? "" : Uri.EscapeDataString(text);
+        return segment.Length != 0;
+    }
+    /// <summary>Header field value that cannot frame another header or request</summary>
+    /// <param name="text">Parameter text</param>
+    /// <returns>Whether the text holds no control character other than horizontal tab</returns>
+    internal static bool HeaderText(string text)
+    {
+        foreach (char c in text) if ((c < ' ' && c != '\t') || c == '\u007f') return false;
+        return true;
+    }
+    /// <summary>Origin identity of a constructed request URI</summary>
+    /// <param name="origin">Configured service origin</param>
+    /// <param name="target">Constructed request URI</param>
+    /// <returns>Whether scheme, host and port are those of the service origin</returns>
+    internal static bool SameOrigin(Uri origin, Uri target) =>
+        origin.Scheme == target.Scheme && origin.Host == target.Host && origin.Port == target.Port;
 }
 `;
 

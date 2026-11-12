@@ -173,6 +173,23 @@ op note(text: string): NoteOutcome;
 @@ipcResult(note, "noted", "noted");
 
 @outcomes
+union ArchiveOutcome {
+  archived: void,
+}
+
+@doc("Path strings that a single URL segment may be unable to carry")
+op archive(tenant: string, item: string, label: string): ArchiveOutcome;
+
+@@publish(archive, #["http", "ipc"]);
+@@httpBinding(archive, "GET", "/{tenant}/{item}/archive", "-");
+@@httpParameter(archive, "tenant", "path", "tenant");
+@@httpParameter(archive, "item", "path", "item");
+@@httpParameter(archive, "label", "header", "x-label");
+@@httpResult(archive, "archived", 204);
+@@ipcBinding(archive, "archive");
+@@ipcResult(archive, "archived", "archived");
+
+@outcomes
 union EchoOutcome {
   echoed: Exact,
 }

@@ -18,7 +18,7 @@ function placement(input: ObjectType, mapping: HttpBinding["parameters"][number]
   if (field === undefined) return "";
   const target =
     mapping.location === "path"
-      ? `route = route.replace(${quote(`{${mapping.wireName}}`)}, &percent_segment(&value));`
+      ? `let Some(segment) = path_segment(&value) else { return Err(OperationFailure::Communication); }; route = route.replace(${quote(`{${mapping.wireName}}`)}, &segment);`
       : mapping.location === "query"
         ? `query.push((${quote(mapping.wireName)}, value));`
         : `let Ok(value) = reqwest::header::HeaderValue::from_str(&value) else { return Err(OperationFailure::Communication); }; headers.insert(reqwest::header::HeaderName::from_static(${quote(mapping.wireName.toLowerCase())}), value);`;
@@ -136,6 +136,7 @@ pub async fn ${op}_http<T: HttpTransport>(transport: &T, ${usesParameters || raw
     ${binding.parameters.map((mapping) => placement(input, mapping)).join("\n")}
     ${bodyStatement(binding, op, bodyField, raw !== undefined)}
     let Ok(${queried ? "mut " : ""}url) = transport.origin().join(${routed ? "&route" : "route"}) else { return Err(OperationFailure::Communication); };
+    if !same_origin(&url, transport.origin()) { return Err(OperationFailure::Communication); }
     ${queried ? "if !query.is_empty() { let mut pairs = url.query_pairs_mut(); for (name, value) in query { pairs.append_pair(name, &value); } }" : ""}
     let mut request = reqwest::Request::new(reqwest::Method::${binding.method}, url);
     ${binding.body.kind === "none" ? "" : `if let Some(body) = body { headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static(${quote(binding.requestMediaType)})); *request.body_mut() = Some(body.into()); }`}

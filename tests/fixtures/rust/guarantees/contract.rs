@@ -58,6 +58,11 @@ impl provider::Handler for Adapter {
         reply!(self, "note", token, { "Noted" => |_body| Ok(types::NoteSuccess::Noted) })
     }
 
+    async fn archive(&self, input: types::ArchiveInput, token: &CancellationToken, _deadline: Option<Instant>) -> Result<types::ArchiveSuccess, HandlerFailure<types::ArchiveRejection>> {
+        record("archive", json!({"tenant": input.tenant(), "item": input.item(), "label": input.label()}));
+        reply!(self, "archive", token, { "Archived" => |_body| Ok(types::ArchiveSuccess::Archived) })
+    }
+
     async fn echo(&self, input: types::EchoInput, token: &CancellationToken, _deadline: Option<Instant>) -> Result<types::EchoSuccess, HandlerFailure<types::EchoRejection>> {
         record("echo", json!({"value": types::encode_exact_value(input.value(), Binding::Ipc)}));
         reply!(self, "echo", token, { "Echoed" => |body| Ok(types::EchoSuccess::Echoed(fixture(types::decode_echo_echoed(body, Binding::Ipc)))) })
@@ -97,6 +102,11 @@ fn observe_note(result: Result<Accepted<types::NoteSuccess>, OperationFailure<ty
     observe!(result, Ok(Accepted { value: types::NoteSuccess::Noted, diagnostics }) => ("success", "Noted", Value::Null, true, diagnostics))
 }
 
+/// Protocol observation of an archive result
+fn observe_archive(result: Result<Accepted<types::ArchiveSuccess>, OperationFailure<types::ArchiveRejection>>) -> Value {
+    observe!(result, Ok(Accepted { value: types::ArchiveSuccess::Archived, diagnostics }) => ("success", "Archived", Value::Null, true, diagnostics))
+}
+
 /// Protocol observation of an echo result
 fn observe_echo(result: Result<Accepted<types::EchoSuccess>, OperationFailure<types::EchoRejection>>) -> Value {
     observe!(result, Ok(Accepted { value: types::EchoSuccess::Echoed(v), diagnostics }) => ("success", "Echoed", types::encode_echo_echoed(&v, Binding::Ipc), false, diagnostics))
@@ -124,6 +134,7 @@ pub async fn run(call: &Call) -> Value {
         "grow" => match types::decode_grow_input(source, wire) { Ok(a) => connect!(call, observe_grow, client::grow_http, client::grow_ipc, provider::grow_direct, a.value), Err(e) => invalid(e) },
         "evaluate" => match types::decode_evaluate_input(source, wire) { Ok(a) => connect!(call, observe_evaluate, client::evaluate_http, client::evaluate_ipc, provider::evaluate_direct, a.value), Err(e) => invalid(e) },
         "note" => match types::decode_note_input(source, wire) { Ok(a) => connect!(call, observe_note, client::note_http, client::note_ipc, provider::note_direct, a.value), Err(e) => invalid(e) },
+        "archive" => match types::decode_archive_input(source, wire) { Ok(a) => connect!(call, observe_archive, client::archive_http, client::archive_ipc, provider::archive_direct, a.value), Err(e) => invalid(e) },
         "echo" => match types::decode_echo_input(source, wire) { Ok(a) => connect!(call, observe_echo, client::echo_http, client::echo_ipc, provider::echo_direct, a.value), Err(e) => invalid(e) },
         _ => panic!("fixture operation is undeclared"),
     }
