@@ -1,0 +1,82 @@
+{
+  "nodes": {
+    "devenv": {
+      "locked": {
+        "dir": "src/modules",
+        "lastModified": 1781195293,
+        "narHash": "sha256-C9OFghpvf3RzK2rGsZjjNNrTrHgFOecEkpDhFnU4QGs=",
+        "owner": "cachix",
+        "repo": "devenv",
+        "rev": "5f5109c83854577191634f7b86fc6e0c8fd44964",
+        "type": "github"
+      },
+      "original": {
+        "dir": "src/modules",
+        "owner": "cachix",
+        "repo": "devenv",
+        "rev": "5f5109c83854577191634f7b86fc6e0c8fd44964",
+        "type": "github"
+      }
+    },
+    "effectsystem-dotnet": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787678595,
+        "narHash": "sha256-yqfEQtHikVKFoLe5aCe6Bdqhh4ZYGWPnBHLqV2CDHmw=",
+        "owner": "YukiIto1999",
+        "repo": "effectsystem-dotnet",
+        "rev": "8d07a0e06a16a402d550af8571ed1f025a7df5f5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "YukiIto1999",
+        "repo": "effectsystem-dotnet",
+        "rev": "8d07a0e06a16a402d550af8571ed1f025a7df5f5",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1775639890,
+        "narHash": "sha256-9O9gNidrdzcb7vgKGtff7QiLtr0IsVaCi0pAXm8anhQ=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "456e8a9468b9d46bd8c9524425026c00745bc4d2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "456e8a9468b9d46bd8c9524425026c00745bc4d2",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "devenv": "devenv",
+        "effectsystem-dotnet": "effectsystem-dotnet",
+        "nixpkgs": "nixpkgs",
+        "typemodeling-dotnet": "typemodeling-dotnet"
+      }
+    },
+    "typemodeling-dotnet": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791811805,
+        "narHash": "sha256-wNMcOi4xUA2mzUwspVUXpx/N53H0oDf+L8zRh43z5AY=",
+        "owner": "YukiIto1999",
+        "repo": "typemodeling-dotnet",
+        "rev": "98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33",
+        "type": "github"
+      },
+      "original": {
+        "owner": "YukiIto1999",
+        "repo": "typemodeling-dotnet",
+        "rev": "98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

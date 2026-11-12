@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="OperationDriver.cs" />
+    <Compile Include="FixtureHandlers.cs" />
+    <Compile Include="ProcessTransport.cs" />
+    <ProjectReference Include="$(GeneratedContractRoot)/csharp/provider/Contract.Provider.csproj" />
+    <ProjectReference Include="$(GeneratedContractRoot)/csharp/client/Contract.Client.csproj" />
+  </ItemGroup>
+  <Target Name="RequireGeneratedContracts" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(GeneratedContractRoot)' == ''" Text="Supply GeneratedContractRoot for the emitted Sample contract" />
+  </Target>
+</Project>

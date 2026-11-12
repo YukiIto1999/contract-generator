@@ -1,0 +1,416 @@
+[
+  { "input": { "type": "ShortLabel", "payload": "\"😀\"" }, "accepted": true, "encoded": "\"😀\"" },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"😀😀😀\"" },
+    "accepted": true,
+    "encoded": "\"😀😀😀\""
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "minLength" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"😀😀😀😀\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maxLength" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"" },
+    "accepted": true,
+    "encoded": "\"😀😀😀\""
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"\\u00e9\\u00e9\\u00e9\"" },
+    "accepted": true,
+    "encoded": "\"ééé\""
+  },
+  {
+    "input": {
+      "type": "ShortLabel",
+      "payload": "\"\\ud83d\\udc68\\u200d\\ud83d\\udc69\\u200d\\ud83d\\udc67\""
+    },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maxLength" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"e\\u0301e\\u0301\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maxLength" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"\\ud800\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"\\ude00\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payloadUnits": [34, 55296, 34] },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "json" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payloadUnits": [34, 56832, 34] },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "json" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payloadUnits": [34, 55357, 56832, 34] },
+    "accepted": true,
+    "encoded": "\"😀\""
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "1" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  },
+  {
+    "input": { "type": "ShortLabel", "payload": "\"abc\" trailing" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "json" }]
+  },
+  {
+    "input": { "type": "ShortLabelConstruction", "payload": "😀😀😀" },
+    "accepted": true,
+    "encoded": "\"😀😀😀\""
+  },
+  {
+    "input": { "type": "ShortLabelConstruction", "payload": "😀😀😀😀" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maxLength" }]
+  },
+  { "input": { "type": "SmallCount", "payload": "1" }, "accepted": true, "encoded": "1" },
+  { "input": { "type": "SmallCount", "payload": "3" }, "accepted": true, "encoded": "3" },
+  {
+    "input": { "type": "SmallCount", "payload": "0" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "minimum" }]
+  },
+  {
+    "input": { "type": "SmallCount", "payload": "4" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maximum" }]
+  },
+  {
+    "input": { "type": "SmallCount", "payload": "99999999999999999999" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "maximum" }]
+  },
+  {
+    "input": { "type": "SmallCount", "payload": "-99999999999999999999" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "minimum" }]
+  },
+  { "input": { "type": "SmallCount", "payload": "1.0" }, "accepted": true, "encoded": "1" },
+  {
+    "input": { "type": "SmallCount", "payload": "\"2\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "SmallCount", "payload": "true" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "SmallCount", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  },
+  {
+    "input": {
+      "type": "ExactDecimal",
+      "payload": "\"123456789012345678901234567890.123456789012345678901234567890\""
+    },
+    "accepted": true,
+    "encoded": "\"123456789012345678901234567890.123456789012345678901234567890\""
+  },
+  {
+    "input": {
+      "type": "ExactDecimal",
+      "payload": "\"-0.0000000000000000000000000000000000000012300\""
+    },
+    "accepted": true,
+    "encoded": "\"-0.0000000000000000000000000000000000000012300\""
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "\"-0.000E+02\"" },
+    "accepted": true,
+    "encoded": "\"-0.000E+02\""
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "\"1E400\"" },
+    "accepted": true,
+    "encoded": "\"1E400\""
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "\"1.\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "\"+1\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "\"\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "1.5" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "ExactDecimal", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  },
+  {
+    "input": {
+      "type": "ExactTimestamp",
+      "payload": "\"0000-02-29T12:34:56.12345678901234567890+05:45\""
+    },
+    "accepted": true,
+    "encoded": "\"0000-02-29T12:34:56.12345678901234567890+05:45\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"0000-02-29T00:00:00Z\"" },
+    "accepted": true,
+    "encoded": "\"0000-02-29T00:00:00Z\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2000-02-29T00:00:00Z\"" },
+    "accepted": true,
+    "encoded": "\"2000-02-29T00:00:00Z\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31T23:59:60.123456789Z\"" },
+    "accepted": true,
+    "encoded": "\"2016-12-31T23:59:60.123456789Z\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2017-01-01T05:29:60.123+05:30\"" },
+    "accepted": true,
+    "encoded": "\"2017-01-01T05:29:60.123+05:30\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"1991-01-01T05:44:60.123456789012+05:45\"" },
+    "accepted": true,
+    "encoded": "\"1991-01-01T05:44:60.123456789012+05:45\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"1999-06-30T23:59:60Z\"" },
+    "accepted": true,
+    "encoded": "\"1999-06-30T23:59:60Z\""
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"1999-06-29T23:59:60Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"0000-02-29T23:59:60.123456789012+05:45\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2024-02-29T23:59:60Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2023-02-29T00:00:00Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"1900-02-29T00:00:00Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"0001-02-29T00:00:00Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31T23:59:61Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-13-01T00:00:00Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31T24:00:00Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31T23:59:59\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31T23:59:59+24:00\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "\"2016-12-31 23:59:59Z\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "ExactTimestamp", "payload": "1" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "RequestId", "payload": "\"11111111-1111-4111-8111-111111111111\"" },
+    "accepted": true,
+    "encoded": "\"11111111-1111-4111-8111-111111111111\""
+  },
+  {
+    "input": { "type": "RequestId", "payload": "\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\"" },
+    "accepted": true,
+    "encoded": "\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\""
+  },
+  {
+    "input": { "type": "RequestId", "payload": "\"{11111111-1111-4111-8111-111111111111}\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "RequestId", "payload": "\"11111111111141118111111111111111\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "RequestId", "payload": "\"not-a-uuid\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "format" }]
+  },
+  {
+    "input": { "type": "RequestId", "payload": "1" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "RequestId", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"future\",\"secret\":123}" },
+    "accepted": false,
+    "violations": [{ "path": "/kind", "rule": "variant" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":1}" },
+    "accepted": false,
+    "violations": [{ "path": "/kind", "rule": "variant" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"text\":\"x\"}" },
+    "accepted": false,
+    "violations": [{ "path": "/kind", "rule": "required" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"text\"}" },
+    "accepted": false,
+    "violations": [{ "path": "/text", "rule": "required" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "\"str\"" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  },
+  {
+    "input": {
+      "type": "Item",
+      "payload": "{\"kind\":\"text\",\"text\":\"😀\",\"secret\":{\"value\":123}}"
+    },
+    "accepted": true,
+    "encoded": "{\"kind\":\"text\",\"text\":\"😀\"}",
+    "diagnostics": [{ "path": "", "key": "secret" }]
+  },
+  {
+    "input": {
+      "type": "Item",
+      "payload": "{\"kind\":\"text\",\"text\":\"\",\"secret\":{\"value\":123}}"
+    },
+    "accepted": false,
+    "violations": [{ "path": "/text", "rule": "minLength" }],
+    "diagnostics": [{ "path": "", "key": "secret" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":\"\"}" },
+    "accepted": true,
+    "encoded": "{\"bytes\":\"\",\"kind\":\"binary\"}"
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":\"AP8=\"}" },
+    "accepted": true,
+    "encoded": "{\"bytes\":\"AP8=\",\"kind\":\"binary\"}"
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":\"!\"}" },
+    "accepted": false,
+    "violations": [{ "path": "/bytes", "rule": "format" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":\"AA\"}" },
+    "accepted": false,
+    "violations": [{ "path": "/bytes", "rule": "format" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":\"-_8=\"}" },
+    "accepted": false,
+    "violations": [{ "path": "/bytes", "rule": "format" }]
+  },
+  {
+    "input": { "type": "Item", "payload": "{\"kind\":\"binary\",\"bytes\":null}" },
+    "accepted": false,
+    "violations": [{ "path": "/bytes", "rule": "null" }]
+  },
+  {
+    "input": { "type": "DefaultRequestId" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "required" }]
+  },
+  {
+    "input": { "type": "Envelope", "payload": "{" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "json" }]
+  },
+  {
+    "input": { "type": "Envelope", "payload": "[]" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "type" }]
+  },
+  {
+    "input": { "type": "Envelope", "payload": "null" },
+    "accepted": false,
+    "violations": [{ "path": "", "rule": "null" }]
+  }
+]

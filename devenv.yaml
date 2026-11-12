@@ -1,0 +1,11 @@
+inputs:
+  nixpkgs:
+    url: github:NixOS/nixpkgs/456e8a9468b9d46bd8c9524425026c00745bc4d2
+  devenv:
+    url: github:cachix/devenv/5f5109c83854577191634f7b86fc6e0c8fd44964?dir=src/modules
+  typemodeling-dotnet:
+    url: github:YukiIto1999/typemodeling-dotnet/98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33
+    flake: false
+  effectsystem-dotnet:
+    url: github:YukiIto1999/effectsystem-dotnet/8d07a0e06a16a402d550af8571ed1f025a7df5f5
+    flake: false

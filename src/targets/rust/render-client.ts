@@ -1,0 +1,126 @@
+import { renderHttp } from "./client-http.js";
+import { renderIpc } from "./client-ipc.js";
+import type { RustContext } from "./context.js";
+import { reachable, support, type Support } from "./support.js";
+
+/** Response and placement helpers retained only for operations whose HTTP binding reaches them */
+const clientSupport: readonly Support[] = [
+  support(
+    "single_header",
+    String.raw`/// Singleton response header selection without accepting conflicting duplicates
+///
+/// - headers: case-insensitive native response headers
+/// - name: generated header name
+/// - Return: exact singleton text value
+fn single_header<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    if values.next().is_some() { None } else { Some(value) }
+}
+`,
+  ),
+  support(
+    "parameter_text",
+    String.raw`/// Exact scalar HTTP parameter text
+///
+/// - value: encoded scalar token
+/// - Return: scalar wire spelling
+fn parameter_text(value: Value) -> String { match value { Value::String(value) => value, value => value.to_string() } }
+`,
+  ),
+  support(
+    "percent_segment",
+    String.raw`/// Percent encoding of a single path parameter
+///
+/// - value: scalar text
+/// - Return: unambiguous path segment
+fn percent_segment(value: &str) -> String { url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>().replace('+', "%20") }
+`,
+  ),
+];
+
+/** Fully read response and the injected and bundled HTTP transports */
+const httpTransport = String.raw`/// Fully read HTTP response without text conversion
+pub struct HttpResponse {
+    /// Exact received status
+    pub status: u16,
+    /// Case-insensitive received headers
+    pub headers: reqwest::header::HeaderMap,
+    /// Raw complete bytes including an empty binary payload
+    pub body: bytes::Bytes,
+}
+/// Injected HTTP execution; the host owns every deadline policy
+pub trait HttpTransport: Send + Sync {
+    /// Borrowed service origin supplied by the host
+    ///
+    /// - self: connection owner
+    /// - Return: service origin
+    fn origin(&self) -> &reqwest::Url;
+    /// Deferred request execution including complete body consumption
+    ///
+    /// - self: native connection owner
+    /// - request: generated request
+    /// - token: original operation cancellation
+    /// - deadline: original host deadline, enforced only by the host
+    /// - Return: fully read native response
+    /// # Errors
+    /// Native communication termination, cancellation or host-enforced deadline expiry
+    fn send(&self, request: reqwest::Request, token: &CancellationToken, deadline: Option<Instant>) -> impl Future<Output = Result<HttpResponse, CommunicationFailure>> + Send;
+}
+/// Concrete adopted HTTP client without hidden connection configuration
+pub struct ReqwestTransport {
+    /// Injected native HTTP client
+    client: reqwest::Client,
+    /// Injected service origin
+    origin: reqwest::Url,
+}
+impl ReqwestTransport {
+    /// Ownership transfer of host connection configuration
+    ///
+    /// - client: native client configured by the host
+    /// - origin: service origin
+    /// - Return: real HTTP transport
+    pub fn new(client: reqwest::Client, origin: reqwest::Url) -> Self { Self { client, origin } }
+}
+impl HttpTransport for ReqwestTransport {
+    fn origin(&self) -> &reqwest::Url { &self.origin }
+    /// Request execution that forwards cancellation by dropping the request future and adds no timer
+    ///
+    /// - self: bundled transport
+    /// - request: generated request
+    /// - token: original operation cancellation
+    /// - deadline: not enforced; the host wraps the transport to enforce a deadline
+    /// - Return: fully read native response
+    /// # Errors
+    /// Connection failure, interrupted response body or cancellation
+    async fn send(&self, request: reqwest::Request, token: &CancellationToken, _deadline: Option<Instant>) -> Result<HttpResponse, CommunicationFailure> {
+        if token.is_cancelled() { return Err(CommunicationFailure::Cancelled); }
+        let work = async {
+            let mut response = self.client.execute(request).await.map_err(|_| CommunicationFailure::Failed)?;
+            let status = response.status().as_u16();
+            let headers = std::mem::take(response.headers_mut());
+            let body = response.bytes().await.map_err(|_| CommunicationFailure::Failed)?;
+            Ok(HttpResponse { status, headers, body })
+        };
+        tokio::select! { biased; result = work => result, () = token.cancelled() => Err(CommunicationFailure::Cancelled) }
+    }
+}
+`;
+
+/** Rust consumer dependency unit using injected existing transports
+ * @param ctx - Resolved rendering context
+ * @returns Complete client crate source
+ */
+export function renderClient(ctx: RustContext): string {
+  const prefix = ctx.prefix.replace(/-/g, "_");
+  const operations = ctx.model.operations
+    .map((operation) => renderIpc(ctx, operation) + renderHttp(ctx, operation))
+    .join("\n");
+  const body = `//! Deferred contract consumers over real HTTP and injected IPC
+use ${prefix}_types::*;
+pub use ${prefix}_transport::*;
+use serde_json::Value;
+use std::future::Future;
+${httpTransport}${operations}`;
+  return body + reachable(body, clientSupport);
+}

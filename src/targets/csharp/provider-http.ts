@@ -1,0 +1,57 @@
+import type { Operation } from "../../model/contract-model.js";
+import { inputOf } from "./acceptance.js";
+import type { CSharpContext } from "./context.js";
+import { doc } from "./docs.js";
+import { lines, name, pascal } from "./naming.js";
+import { opName } from "./outcome-codecs.js";
+import { acceptRequest } from "./provider-request.js";
+import { httpResponse, outcomeBranches } from "./provider-response.js";
+
+/** Native HTTP request acceptance and response serialization
+ * @param c - Target context
+ * @param operation - Operation
+ * @returns Provider method
+ */
+export function renderHttpProvider(c: CSharpContext, operation: Operation): string {
+  const failure = opName(operation, "Failure");
+  const input = c.type(inputOf(c, operation).id);
+  const accepted = `Result<Accepted<${input}>, ContractFailure>`;
+  const direct = name(pascal(operation.name));
+  return lines(
+    doc(
+      "Native HTTP acceptance and handler response dispatch",
+      ["request", "deadline"],
+      "Native response or positioned input rejection",
+      {
+        throws: [["InvalidOperationException", "A handler result that breaks the contract"]],
+      },
+    ),
+    `public static Effect<IContractHandlers, ${failure}, HttpResponseMessage> ${name(pascal(operation.name) + "Http")}(HttpRequestMessage request, DateTimeOffset? deadline) {`,
+    `var fx = new EffectContext<IContractHandlers, ${failure}>();`,
+    `return fx.Try<${accepted}>(async (_, cancellationToken) => {`,
+    acceptRequest(c, operation),
+    `}, exception => exception is HttpRequestException or IOException ? new ${failure}.Communication(new("request-communication")) : throw exception)`,
+    `.Bind(decoded => decoded is ${accepted}.Succeeded accepted ? ${direct}(accepted.Value.Value, deadline) : fx.Fail<${opName(operation, "Success")}>(new ${failure}.InvalidInput(((${accepted}.Failed)decoded).Failure)))`,
+    ".Map(outcome => {",
+    outcomeBranches(
+      operation,
+      false,
+      "outcome",
+      (outcome) => httpResponse(c, operation, outcome),
+      "Invalid handler success",
+    ),
+    "})",
+    ".Recover(failure => {",
+    `if (failure is not ${failure}.Declared declared) return fx.Fail<HttpResponseMessage>(failure);`,
+    "return fx.Sync<HttpResponseMessage>(() => {",
+    outcomeBranches(
+      operation,
+      true,
+      "declared.Rejection",
+      (outcome) => httpResponse(c, operation, outcome),
+      "Invalid handler rejection",
+    ),
+    "}); });",
+    "}",
+  );
+}

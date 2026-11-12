@@ -1,0 +1,56 @@
+{
+  "name": "@yukiito1999/contract-generator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeSpec contract generation preserving validated values and public-operation semantics",
+  "license": "MIT",
+  "author": "YukiIto1999",
+  "files": [
+    "dist",
+    "lib",
+    "README.md",
+    "README.ja.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "spec.md"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vp build",
+    "typecheck": "node node_modules/typescript-native/bin/tsc --noEmit",
+    "check": "vp check",
+    "format": "vp fmt",
+    "test": "vp test run",
+    "verify": "npm run build && npm run typecheck && npm run check && npm test",
+    "prepare:native": "node scripts/prepare-native-fixtures.ts"
+  },
+  "dependencies": {
+    "lossless-json": "4.3.3",
+    "ts-results-es": "7.1.0"
+  },
+  "devDependencies": {
+    "@scure/base": "2.4.0",
+    "@types/node": "24.10.1",
+    "@typespec/compiler": "1.17.0",
+    "fast-check": "4.3.0",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript-native": "npm:typescript@7.0.2",
+    "vite-plus": "1.5.1"
+  },
+  "peerDependencies": {
+    "@typespec/compiler": "1.17.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": "^24.11.0 || >=26.0.0"
+  },
+  "tspMain": "lib/main.tsp"
+}
