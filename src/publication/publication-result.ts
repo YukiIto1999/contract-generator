@@ -2,7 +2,7 @@
 export interface PublicationReceipt {
   /** Replacement of the previously published tree */
   readonly changed: boolean;
-  /** Owned temporary paths retained after a cleanup failure */
+  /** Preserved temporary paths requiring verified manual cleanup */
   readonly retainedPaths: readonly string[];
 }
 
@@ -14,6 +14,7 @@ export interface PublicationFailure {
     | "output-not-owned"
     | "output-modified"
     | "output-interrupted"
+    | "output-conflict"
     | "output-io"
     | "invalid-artifact";
   /** Actionable explanation without artifact contents */

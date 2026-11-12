@@ -28,6 +28,11 @@ Generated operations therefore receive an explicit nullable `DateTimeOffset` dea
 The injected IPC transport receives the same deadline, and native HTTP handlers can read `ContractClient.DeadlineOption` from `HttpRequestMessage.Options`.
 The host owns the actual deadline cancellation token and its termination reason.
 
+Every generated unit and fixture project attaches the existing `TypeModeling.Analyzers` source project as a build-only analyzer (`OutputItemType="Analyzer"`, `ReferenceOutputAssembly="false"`, `PrivateAssets="all"`).
+Its path is derived from `TypeModelingProjectPath` relative to the consuming project, so no analyzer-path setting is required.
+Exhaustiveness diagnostics (`CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847`, and `TYPMOD001`) are errors.
+The types-only runtime-dependency test also rejects analyzer and Roslyn assemblies in the output and dependency manifest.
+
 These sources were built and executed with .NET SDK 10.0.201 from `devenv shell`.
 The generated units, the three drivers and the accepted role probes compile without any compiler diagnostic of their own; each rejected role probe fails with exactly one `CS0029`.
 The dependency projects were built from the same checkouts and reported no diagnostic either.
@@ -66,6 +71,25 @@ The last two fail with exactly one diagnostic each, `error CS0029`: `RecordId` c
 Run the negative probes separately; they are excluded from the executable fixture projects.
 
 For the second contract, generate `features.tsp` with `csharp-namespace` `Features`, then build `FeaturesDriver.csproj` and the probes `FeatureInheritedRoleAccepted` (exits zero: a narrowed scalar yields the ancestor's `CustomerRole`) and `FeatureRejectInheritedAsOther` (one `error CS0029`: `CustomerRole` is not an `OtherCustomer`).
+
+## Closed-hierarchy consumer compilation
+
+`exhaustiveness.tsp` declares a discriminator union, a mixed-kind enumeration, two successes and two declared rejections.
+`ExhaustivenessProbe.csproj` references all three generated units and compiles one hand-written consumer from `probes/$(Probe).cs`.
+The fixture's `Directory.Build.props` imports the delivered `csharp/Contract.Analysis.props` from `GeneratedContractRoot`; it does not define a separate analyzer reference or exhaustiveness policy.
+The default `ExhaustiveConsumer` matches every public variant without a catchall, including operation failures, provider failures and the runtime's generic `Result`.
+Its executable observes both union and enumeration variants and the ordinary rejection of unknown or null wire inputs.
+The `MissingChoice`, `MissingMixed`, `MissingSuccess`, `MissingRejection`, `MissingFailure`, `MissingProviderFailure`, `GuardedChoice` and `OpenExpression` probes are expected to fail with an exhaustiveness error.
+`ClosedStatement` is expected to fail with `TYPMOD001`.
+These are native consumer compilation tests, not generated-source or project-wiring assertions.
+
+The pinned analyzer does **not** forbid a discard arm in a consumer's switch expression.
+Generated closed switches themselves have no catchall; a consumer's catchall still needs review.
+The exact pinned evidence is `src/TypeModeling.Analyzers/AnalyzerReleases.Shipped.md:10` (only `TYPMOD001`), `diagnostics/closedunionswitchstatement/ClosedUnionSwitchStatementAnalyzer.cs:29-33` (switch-statement registration), and `suppression/closedunionexhaustiveness/ClosedUnionExhaustivenessSuppressor.cs:65-84` (suppression only for covered `CS8509` and `CS8524`).
+Those latter paths are relative to the analyzer source directory in the pinned TypeModeling checkout.
+The closed annotation is recognized by its `TypeModeling.Domain.ClosedUnionAttribute` metadata name and nested sealed subclasses (`facts/ClosedTypeSet.cs:10-12,25-43`); the generator already emits that shape.
+
+Run `npx vp test run tests/integration/medium/csharp-exhaustiveness.test.ts` inside `devenv shell` for the focused consumer checks.
 
 ## Codec observations
 

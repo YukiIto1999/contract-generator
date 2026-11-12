@@ -174,6 +174,33 @@ internal static class FeaturesDriver
         writer.WriteEndArray();
     }
 
+    /// <summary>Chosen success output</summary>
+    /// <param name="writer">Observation output</param>
+    /// <param name="name">Public variant name</param>
+    /// <param name="value">Nullable payload observation</param>
+    /// <param name="hasValue">Presence of a payload</param>
+    /// <returns>Completed observation</returns>
+    private static Unit WriteChoice(Utf8JsonWriter writer, string name, string? value, bool hasValue = true)
+    {
+        writer.WriteString("case", name);
+        if (hasValue) writer.WriteString("value", value);
+        return Unit.Value;
+    }
+
+    /// <summary>Chosen failure output</summary>
+    /// <param name="writer">Observation output</param>
+    /// <param name="classification">Failure origin</param>
+    /// <param name="reason">Declared or communication reason</param>
+    /// <param name="input">Positioned input violations</param>
+    /// <returns>Completed observation</returns>
+    private static Unit WriteChooseFailure(Utf8JsonWriter writer, string classification, string? reason, ContractFailure? input = null)
+    {
+        writer.WriteString("exit", classification);
+        if (reason is not null) writer.WriteString("reason", reason);
+        if (input is not null) Violations(writer, input);
+        return Unit.Value;
+    }
+
     /// <summary>Generated client call through a real socket peer or an in-memory loopback to the generated provider</summary>
     /// <param name="request">Scenario</param>
     /// <param name="client">Native HTTP client</param>
@@ -192,19 +219,19 @@ internal static class FeaturesDriver
         {
             var input = Required(ChooseInput.Create());
             WriteExit(writer, await consumer.Run(ContractClient.ChooseHttp(input, null), CancellationToken.None),
-                success => { switch (success) {
-                    case ChooseSuccess.First first: writer.WriteString("case", "First"); writer.WriteString("value", first.Value.Value); break;
-                    case ChooseSuccess.Second second: writer.WriteString("case", "Second"); writer.WriteString("value", second.Value.Value); break;
-                    case ChooseSuccess.Nil nil: writer.WriteString("case", "Nil"); if (nil.Value is null) writer.WriteNull("value"); else writer.WriteString("value", nil.Value); break;
-                    case ChooseSuccess.Done: writer.WriteString("case", "Done"); break;
-                    default: throw new InvalidOperationException("Invalid generated success");
-                } },
-                failure => { switch (failure) {
-                    case ChooseFailure.Declared { Rejection: ChooseRejection.Refused refused }: writer.WriteString("exit", "declared"); writer.WriteString("reason", refused.Value.Reason); break;
-                    case ChooseFailure.Communication communication: writer.WriteString("exit", "transport"); writer.WriteString("reason", communication.Failure.Reason); break;
-                    case ChooseFailure.InvalidInput invalid: writer.WriteString("exit", "input"); Violations(writer, invalid.Failure); break;
-                    default: throw new InvalidOperationException("Invalid generated failure");
-                } });
+                success => { _ = success switch {
+                    ChooseSuccess.First first => WriteChoice(writer, "First", first.Value.Value),
+                    ChooseSuccess.Second second => WriteChoice(writer, "Second", second.Value.Value),
+                    ChooseSuccess.Nil nil => WriteChoice(writer, "Nil", nil.Value),
+                    ChooseSuccess.Done => WriteChoice(writer, "Done", null, false),
+                }; },
+                failure => { _ = failure switch {
+                    ChooseFailure.Declared declared => declared.Rejection switch {
+                        ChooseRejection.Refused refused => WriteChooseFailure(writer, "declared", refused.Value.Reason),
+                    },
+                    ChooseFailure.Communication communication => WriteChooseFailure(writer, "transport", communication.Failure.Reason),
+                    ChooseFailure.InvalidInput invalid => WriteChooseFailure(writer, "input", null, invalid.Failure),
+                }; });
         }
         else if (operation == "route")
         {

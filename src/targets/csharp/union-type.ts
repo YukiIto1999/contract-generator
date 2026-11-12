@@ -103,6 +103,47 @@ function readCase(c: CSharpContext, node: UnionType, plan: VariantPlan): string 
   );
 }
 
+/** Exhaustive JSON writer of the closed variant family
+ * @param c - Target context
+ * @param node - Resolved union
+ * @param plans - Variant plans
+ * @returns Writer with unit-valued variant completions
+ */
+function writeMember(c: CSharpContext, node: UnionType, plans: readonly VariantPlan[]): string {
+  const t = c.type(node.id);
+  return lines(
+    doc("Closed variant JSON output", ["writer", "value", "binding", "encoding"], undefined, {
+      throws: [
+        [
+          "System.Runtime.CompilerServices.SwitchExpressionException",
+          "A value outside the closed hierarchy",
+        ],
+      ],
+    }),
+    `internal static void Write(Utf8JsonWriter writer, ${t} value, string binding, string? encoding) {`,
+    "_ = value switch {",
+    ...plans.map(
+      (plan, index) =>
+        `${t}.${plan.record} variant${index} => Write${pascal(plan.variant.name)}(writer, variant${index}.Value, binding, encoding),`,
+    ),
+    "};",
+    "}",
+    ...plans.map((plan) =>
+      lines(
+        doc(
+          "Validated variant payload output",
+          ["writer", "value", "binding", "encoding"],
+          "Completed output",
+        ),
+        `private static global::TypeModeling.Domain.Unit Write${pascal(plan.variant.name)}(Utf8JsonWriter writer, ${c.use(plan.variant.type)} value, string binding, string? encoding) {`,
+        writeUse(c, plan.variant.type, "value"),
+        "return global::TypeModeling.Domain.Unit.Value;",
+        "}",
+      ),
+    ),
+  );
+}
+
 /** Union codec with payload checks shared by construction and decoding
  * @param c - Target context
  * @param node - Resolved union
@@ -131,16 +172,7 @@ export function renderUnion(c: CSharpContext, node: UnionType): string {
     `default: c.Add(${tagPath}, "variant"); return default!;`,
     "}",
     "}",
-    doc("Closed variant JSON output", ["writer", "value", "binding", "encoding"], undefined, {
-      throws: [["InvalidOperationException", "A value outside the closed hierarchy"]],
-    }),
-    `internal static void Write(Utf8JsonWriter writer, ${t} value, string binding, string? encoding) {`,
-    ...plans.map(
-      (plan, index) =>
-        `if (value is ${t}.${plan.record} variant${index}) { ${writeUse(c, plan.variant.type, `variant${index}.Value`)} return; }`,
-    ),
-    `throw new InvalidOperationException("Invalid closed union");`,
-    "}",
+    writeMember(c, node, plans),
   );
   return lines(declaration(c, node, plans), codecShell(c, node, members, ""));
 }

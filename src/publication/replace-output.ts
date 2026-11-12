@@ -1,15 +1,28 @@
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Err, Ok, type Result } from "ts-results-es";
 import type { GeneratedFile } from "../model/contract-model.js";
-import { filesystemMessage } from "./filesystem-error.js";
-import type { ExistingOutput } from "./inspect-output.js";
-import { manifestName, ownedDirectories, type OutputManifest } from "./output-manifest.js";
-import { createWorkspace, discardWorkspace, type Workspace } from "./publication-workspace.js";
+import { filesystemMessage, isFilesystemError } from "./filesystem-error.js";
+import { inspectOutput, type ExistingOutput } from "./inspect-output.js";
+import {
+  manifestName,
+  ownedDirectories,
+  sameOutput,
+  type OutputManifest,
+} from "./output-manifest.js";
+import {
+  createWorkspace,
+  discardEmptyDirectory,
+  discardWorkspace,
+  type OwnedDirectory,
+  type Workspace,
+} from "./publication-workspace.js";
 import { refusal, type PublicationFailure, type PublicationReceipt } from "./publication-result.js";
 
 /** Outcome of the attempt to move the staged tree into place */
-type Swap = { readonly published: true } | { readonly published: false; readonly message: string };
+type Swap =
+  | { readonly published: true }
+  | { readonly published: false; readonly failure: PublicationFailure };
 
 /** Complete tree preparation outside the published path
  * @param workspace - Owned workspace of this attempt
@@ -55,12 +68,35 @@ async function restoreDisplaced(root: string, workspace: Workspace): Promise<str
   }
 }
 
+/** Exclusive reservation before installing a tree at an initially missing output
+ * @param root - Missing output path under exclusive publication ownership
+ * @returns Identity of the reservation or refusal of an intervening destination
+ * @throws {@link Error} Filesystem failure while reserving the destination
+ */
+async function reserveDestination(
+  root: string,
+): Promise<Result<OwnedDirectory, PublicationFailure>> {
+  try {
+    await mkdir(root);
+  } catch (error) {
+    if (isFilesystemError(error) && error.code === "EEXIST")
+      return Err(
+        refusal(
+          "output-not-owned",
+          "Output appeared before installation and was left untouched: " + root,
+        ),
+      );
+    throw error;
+  }
+  return Ok({ path: root, identity: await lstat(root) });
+}
+
 /** Replacement of the output path by the staged tree
  * @param root - Verified output root
  * @param workspace - Owned workspace holding the staged tree
  * @param replacing - Whether a previous tree occupies the output path
- * @returns Publication or a failure after the previous tree was returned to its path
- * @throws {@link Error} A defect that is not a filesystem failure, after the previous tree was returned
+ * @returns Publication or refusal with explicit preserved recovery paths
+ * @throws {@link Error} A non-filesystem defect after safe reservation cleanup
  */
 async function moveIntoPlace(
   root: string,
@@ -68,20 +104,56 @@ async function moveIntoPlace(
   replacing: boolean,
 ): Promise<Swap> {
   let displaced = false;
+  const reserved = replacing ? undefined : await reserveDestination(root);
+  if (reserved?.isErr()) return { published: false, failure: reserved.error };
   try {
     if (replacing) await rename(root, workspace.displaced);
     displaced = replacing;
     await rename(workspace.staged, root);
     return { published: true };
   } catch (error) {
+    const retainedPaths = reserved?.isOk() ? await discardEmptyDirectory(reserved.value) : [];
     const stranded = displaced ? await restoreDisplaced(root, workspace) : undefined;
     const message = filesystemMessage(error);
-    if (stranded === undefined) return { published: false, message };
+    if (stranded === undefined)
+      return { published: false, failure: refusal("output-io", message, retainedPaths) };
     return {
       published: false,
-      message: `${message}; previous output preserved at ${workspace.displaced}; rollback failed: ${stranded}`,
+      failure: refusal(
+        "output-io",
+        `${message}; previous output preserved at ${workspace.displaced}; rollback failed: ${stranded}`,
+      ),
     };
   }
+}
+
+/** Protection of changes made to the destination during staging
+ * @param root - Exclusively owned output path
+ * @param previous - Destination identity verified before staging
+ * @returns Refusal for a newly appeared or changed destination
+ * @throws {@link Error} Filesystem failure while rechecking the destination
+ */
+async function verifyUnchangedDestination(
+  root: string,
+  previous: ExistingOutput | undefined,
+): Promise<PublicationFailure | undefined> {
+  const current = await inspectOutput(root);
+  if (current.isErr()) return current.error;
+  if (previous === undefined && current.value === undefined) return undefined;
+  if (
+    previous !== undefined &&
+    current.value !== undefined &&
+    previous.device === current.value.device &&
+    previous.inode === current.value.inode &&
+    (previous.manifest === null
+      ? current.value.manifest === null
+      : sameOutput(current.value.manifest, previous.manifest))
+  )
+    return undefined;
+  return refusal(
+    "output-not-owned",
+    "Output changed during staging and was left untouched: " + root,
+  );
 }
 
 /** Staging followed by replacement of the output path
@@ -90,7 +162,7 @@ async function moveIntoPlace(
  * @param previous - Verified previous destination
  * @param files - Complete generated artifacts
  * @param manifest - Complete generated identities
- * @returns Publication or a failure that left the previous output in place
+ * @returns Publication or refusal with preservation of the previous output
  * @throws {@link Error} A defect that is not a filesystem failure
  */
 async function stageAndSwap(
@@ -102,19 +174,23 @@ async function stageAndSwap(
 ): Promise<Swap> {
   try {
     await stageTree(workspace, previous, files, manifest);
+    const changed = await verifyUnchangedDestination(root, previous);
+    if (changed !== undefined) return { published: false, failure: changed };
   } catch (error) {
-    return { published: false, message: filesystemMessage(error) };
+    return { published: false, failure: refusal("output-io", filesystemMessage(error)) };
   }
   return moveIntoPlace(root, workspace, previous !== undefined);
 }
 
-/** Directory replacement with rollback before successful publication
- * @param root - Verified output root
+/** Exclusively owned directory replacement with a recoverable gap between renames
+ *
+ * Rollback retains the displaced previous tree when it cannot return to the output path
+ * @param root - Canonical-parent output path under exclusive publication ownership
  * @param previous - Verified previous destination
  * @param files - Complete generated artifacts
  * @param manifest - Complete generated identities
  * @returns Publication receipt or failure with explicit recovery ownership
- * @throws {@link Error} A defect that is not a filesystem failure, after the workspace was discarded
+ * @throws {@link Error} A non-filesystem defect after safe workspace cleanup
  */
 export async function replaceOutput(
   root: string,
@@ -132,5 +208,5 @@ export async function replaceOutput(
   }
   const retainedPaths = await discardWorkspace(workspace, swap.published);
   if (swap.published) return Ok({ changed: true, retainedPaths });
-  return Err(refusal("output-io", swap.message, retainedPaths));
+  return Err({ ...swap.failure, recoveryPaths: [...swap.failure.recoveryPaths, ...retainedPaths] });
 }

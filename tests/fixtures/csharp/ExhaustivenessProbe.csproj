@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Probe Condition="'$(Probe)' == ''">ExhaustiveConsumer</Probe>
+    <OutputType Condition="'$(Probe)' == 'ExhaustiveConsumer'">Exe</OutputType>
+    <AssemblyName Condition="'$(Probe)' != 'ExhaustiveConsumer'">$(Probe)</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="probes/$(Probe).cs" />
+    <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
+    <ProjectReference Include="$(GeneratedContractRoot)/csharp/provider/Contract.Provider.csproj" />
+    <ProjectReference Include="$(GeneratedContractRoot)/csharp/client/Contract.Client.csproj" />
+  </ItemGroup>
+</Project>

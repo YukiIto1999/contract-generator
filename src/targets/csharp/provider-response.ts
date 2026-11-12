@@ -1,34 +1,35 @@
 import type { Operation, Outcome } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
+import { doc } from "./docs.js";
 import type { CSharpContext } from "./context.js";
 import { isJsonMediaType, lines, name, pascal, quote } from "./naming.js";
 import { opName } from "./outcome-codecs.js";
 import { requireValue } from "./result-helpers.js";
 
-/** Branches over the closed outcome family of a handler result
+/** Exhaustive expression over one closed handler outcome family
  * @param operation - Operation
- * @param rejection - Whether the declared rejections or the successes are matched
+ * @param rejection - Whether declared rejections or successes are matched
  * @param subject - Expression of the family value
- * @param render - Statements that answer one matched outcome through `value`
- * @param defect - Defect message for a value outside the family
- * @returns One guarded block per outcome and the defect that closes the hierarchy
+ * @param binding - Response serialization binding
+ * @returns Switch expression invoking the corresponding typed response overload
  */
-export function outcomeBranches(
+export function outcomeSwitch(
   operation: Operation,
   rejection: boolean,
   subject: string,
-  render: (outcome: Outcome) => string,
-  defect: string,
+  binding: "Http" | "Ipc",
 ): string {
+  const outcomes = operation.outcomes.filter((outcome) => outcome.rejection === rejection);
+  if (outcomes.length === 0)
+    return 'throw new InvalidOperationException("Invalid handler rejection")';
   const family = opName(operation, rejection ? "Rejection" : "Success");
   return lines(
-    ...operation.outcomes
-      .filter((outcome) => outcome.rejection === rejection)
-      .map(
-        (outcome) =>
-          `{ if (${subject} is ${family}.${name(pascal(outcome.name))} value) { ${render(outcome)} } }`,
-      ),
-    `throw new InvalidOperationException(${quote(defect)});`,
+    `${subject} switch {`,
+    ...outcomes.map(
+      (outcome) =>
+        `${family}.${name(pascal(outcome.name))} value => ${opName(operation, binding + "Response")}(value),`,
+    ),
+    "}",
   );
 }
 
@@ -70,7 +71,7 @@ function responseContent(
  * @param outcome - Outcome
  * @returns Statements that return the response
  */
-export function httpResponse(c: CSharpContext, operation: Operation, outcome: Outcome): string {
+function httpResponse(c: CSharpContext, operation: Operation, outcome: Outcome): string {
   const mapping = operation.http!.results.find((m) => m.outcome === outcome.name)!;
   return lines(
     `var response = new HttpResponseMessage((System.Net.HttpStatusCode)${mapping.status});`,
@@ -90,7 +91,7 @@ export function httpResponse(c: CSharpContext, operation: Operation, outcome: Ou
  * @param outcome - Outcome
  * @returns Statements that return the envelope text
  */
-export function ipcResponse(operation: Operation, outcome: Outcome): string {
+function ipcResponse(operation: Operation, outcome: Outcome): string {
   const tag = operation.ipc!.results.find((r) => r.outcome === outcome.name)!.tag;
   return lines(
     outcome.type &&
@@ -102,5 +103,31 @@ export function ipcResponse(operation: Operation, outcome: Outcome): string {
     "using var stream = new MemoryStream();",
     `using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); writer.WriteString("tag", ${quote(tag)}); ${outcome.type ? 'writer.WritePropertyName("body"); writer.WriteRawValue(body);' : ""} writer.WriteEndObject(); }`,
     "return Encoding.UTF8.GetString(stream.ToArray());",
+  );
+}
+
+/** Typed serializers selected by the closed outcome switches
+ * @param c - Target context
+ * @param operation - Operation
+ * @param binding - Response serialization binding
+ * @returns One response overload per outcome
+ */
+export function renderResponseMethods(
+  c: CSharpContext,
+  operation: Operation,
+  binding: "Http" | "Ipc",
+): string {
+  const response = binding === "Http" ? "HttpResponseMessage" : "string";
+  return lines(
+    ...operation.outcomes.map((outcome) =>
+      lines(
+        doc("Validated handler outcome output", ["value"], "Resolved response", {
+          throws: [["InvalidOperationException", "A handler payload that breaks the contract"]],
+        }),
+        `private static ${response} ${opName(operation, binding + "Response")}(${opName(operation, outcome.rejection ? "Rejection" : "Success")}.${name(pascal(outcome.name))} value) {`,
+        binding === "Http" ? httpResponse(c, operation, outcome) : ipcResponse(operation, outcome),
+        "}",
+      ),
+    ),
   );
 }

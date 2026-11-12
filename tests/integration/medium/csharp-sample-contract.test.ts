@@ -9,8 +9,9 @@ import { buildCSharpProject, generatedDiagnostics } from "./csharp-toolchain.js"
 /** Sample contract with the types-only codec driver */
 const sample = useContract(sampleSource, "Sample", ["CodecDriver.csproj"]);
 
-/** Assemblies that a types-only consumer must never load */
-const forbidden = /EffectSystem|Contract\.(Provider|Client)/;
+/** Communication and compile-time assemblies that a types-only consumer must never load */
+const forbidden =
+  /EffectSystem|Contract\.(Provider|Client)|TypeModeling\.Analyzers|Microsoft\.CodeAnalysis/;
 
 nativeTest(
   "compiles the generated units and the codec driver without a compiler diagnostic of their own",

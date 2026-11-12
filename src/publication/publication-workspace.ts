@@ -1,4 +1,5 @@
-import { lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, mkdtemp, rm, rmdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { isFilesystemError, isMissing } from "./filesystem-error.js";
 
@@ -13,6 +14,32 @@ export interface Workspace {
   readonly staged: string;
   /** Location of the previous tree while it is out of place */
   readonly displaced: string;
+}
+
+/** Empty directory created by this attempt with a protected filesystem identity */
+export interface OwnedDirectory {
+  /** Path reserved by an exclusive mkdir */
+  readonly path: string;
+  /** Identity recorded before any cleanup */
+  readonly identity: Stats;
+}
+
+/** Removal of only this attempt's unchanged empty directory
+ * @param directory - Directory created by this attempt
+ * @returns Preserved path when cleanup cannot safely remove the entry
+ * @throws {@link Error} A non-filesystem defect during cleanup
+ */
+export async function discardEmptyDirectory(directory: OwnedDirectory): Promise<readonly string[]> {
+  try {
+    const current = await lstat(directory.path);
+    if (current.dev !== directory.identity.dev || current.ino !== directory.identity.ino)
+      return [directory.path];
+    await rmdir(directory.path);
+    return [];
+  } catch (error) {
+    if (!isFilesystemError(error)) throw error;
+    return isMissing(error) ? [] : [directory.path];
+  }
 }
 
 /** Workspace layout below an existing directory

@@ -4,7 +4,7 @@ import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { lines, name, pascal } from "./naming.js";
 import { opName } from "./outcome-codecs.js";
-import { ipcResponse, outcomeBranches } from "./provider-response.js";
+import { outcomeSwitch, renderResponseMethods } from "./provider-response.js";
 
 /** Provider direct call through the same default acceptance
  * @param c - Target context
@@ -56,26 +56,13 @@ export function renderIpcProvider(c: CSharpContext, operation: Operation): strin
     `var decoded = ${c.codec(operation.input)}.Decode(parameters, "ipc");`,
     `if (decoded is ${decoded}.Failed failed) return fx.Fail<string>(new ${failure}.InvalidInput(failed.Failure));`,
     `return ${name(pascal(operation.name))}(((${decoded}.Succeeded)decoded).Value.Value, deadline)`,
-    ".Map(outcome => {",
-    outcomeBranches(
-      operation,
-      false,
-      "outcome",
-      (outcome) => ipcResponse(operation, outcome),
-      "Invalid handler success",
-    ),
-    "})",
-    ".Recover(failure => {",
-    `if (failure is not ${failure}.Declared declared) return fx.Fail<string>(failure);`,
-    "return fx.Sync<string>(() => {",
-    outcomeBranches(
-      operation,
-      true,
-      "declared.Rejection",
-      (outcome) => ipcResponse(operation, outcome),
-      "Invalid handler rejection",
-    ),
-    "}); });",
+    `.Map(outcome => ${outcomeSwitch(operation, false, "outcome", "Ipc")})`,
+    ".Recover(failure => failure switch {",
+    `${failure}.InvalidInput invalid => fx.Fail<string>(invalid),`,
+    `${failure}.Communication communication => fx.Fail<string>(communication),`,
+    `${failure}.Declared declared => fx.Sync<string>(() => ${outcomeSwitch(operation, true, "declared.Rejection", "Ipc")}),`,
+    "});",
     "}",
+    renderResponseMethods(c, operation, "Ipc"),
   );
 }

@@ -19,6 +19,10 @@ export interface ExistingOutput {
   readonly manifest: OutputManifest | null;
   /** Existing destination permission bits */
   readonly mode: number;
+  /** Filesystem device of the inspected destination */
+  readonly device: number;
+  /** Filesystem entry identity before staging */
+  readonly inode: number;
 }
 
 /** Inventory without traversing unowned directories or symbolic links
@@ -112,9 +116,9 @@ export async function inspectOutput(
   if (stat === undefined) return Ok(undefined);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     return Err(refusal("output-not-owned", "Output is not an owned directory: " + root));
-  const mode = stat.mode & 0o777;
+  const identity = { mode: stat.mode & 0o777, device: stat.dev, inode: stat.ino };
   const entries = await readdir(root);
-  if (entries.length === 0) return Ok({ manifest: null, mode });
+  if (entries.length === 0) return Ok({ manifest: null, ...identity });
   const owned = await ownedManifest(root, entries);
   if (owned.isErr()) return Err(owned.error);
   const modified = await modifiedArtifact(root, owned.value.files);
@@ -122,5 +126,5 @@ export async function inspectOutput(
     return Err(
       refusal("output-modified", "Generated artifact was modified outside generation: " + modified),
     );
-  return Ok({ manifest: owned.value, mode });
+  return Ok({ manifest: owned.value, ...identity });
 }

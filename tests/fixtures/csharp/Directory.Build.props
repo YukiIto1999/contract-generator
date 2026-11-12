@@ -4,4 +4,5 @@
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
     <BaseOutputPath>bin/$(MSBuildProjectName)/</BaseOutputPath>
   </PropertyGroup>
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
 </Project>

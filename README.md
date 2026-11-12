@@ -133,8 +133,14 @@ tsp compile main.tsp
 
 The emitter owns its output directory.
 It refuses a directory that it did not generate and a generated file that was edited by hand.
-It replaces the whole directory at once, and when a replacement was interrupted it restores the previous output on the next run.
-Run it with `check: true` in the verification entry of the consuming repository to detect drift.
+Publication excludes other cooperating generators with a sibling `.<output>.contract-generator.lock` ownership marker.
+A competing generation or drift check fails with `output-conflict`; it does not wait or take over ownership.
+Replacement moves the old tree aside before installing the new one, so readers outside this protocol can observe a missing directory between the two moves.
+This is not an atomic swap or a power-loss durability guarantee.
+Normal completion releases ownership, but a killed process can leave the marker and its previous output behind.
+The emitter reports this conflict without deleting the marker; recovery requires confirming that no owner remains and preserving any reported backup before removing the abandoned marker.
+With exclusive ownership and a missing output, a normal generation restores a single verified, unmodified previous tree before continuing.
+Run it with `check: true` in the verification entry of the consuming repository to detect drift without creating ownership or recovering interrupted output.
 
 ## Output
 
@@ -163,7 +169,26 @@ The module named by `typescript-effect-module` exports `Effect<Env, E, A>`, call
 
 The generated projects reference TypeModeling and EffectSystem from source checkouts at their `v0.2.0` tags, placed side by side as `typemodeling-dotnet/` and `effectsystem-dotnet/`.
 Pass the project paths as the MSBuild properties `TypeModelingProjectPath` and `EffectSystemProjectPath`.
+All three generated projects import `csharp/Contract.Analysis.props`, which attaches the existing `TypeModeling.Analyzers` project and makes exhaustiveness diagnostics errors without adding analyzer assemblies as runtime dependencies.
+MSBuild does not propagate analyzer references or warning policies through a project reference, so every consumer project must import the same generated file.
+Inside the consuming SDK project, set `GeneratedContractRoot` to the generated output directory relative to that project, and add:
+
+```xml
+<PropertyGroup>
+  <GeneratedContractRoot>../generated</GeneratedContractRoot>
+</PropertyGroup>
+<Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+<ItemGroup>
+  <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
+</ItemGroup>
+```
+
+Supply `TypeModelingProjectPath` before the import, as above; the consumer uses the same source checkout as the generated projects.
+The shared import rejects a missing analyzer project rather than silently omitting the check.
+Generated switches over closed types enumerate every variant without a default or discard arm.
+The pinned analyzer rejects an omitted variant and a switch statement over a closed type, but does not prohibit a consumer's catchall switch-expression arm.
 EffectSystem `v0.2.0` has no deadline type, so each operation takes a `DateTimeOffset? deadline` and passes it on unchanged, and the host owns the timer.
+This deadline representation does not yet satisfy the standard's `Deadline` integration in `languages/csharp/connection.md` and `languages/csharp/coordination.md`; replacing it requires a compatible EffectSystem release that owns the deadline and its execution policy.
 
 ### Rust
 

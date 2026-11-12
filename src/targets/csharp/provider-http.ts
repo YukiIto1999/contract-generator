@@ -5,7 +5,7 @@ import { doc } from "./docs.js";
 import { lines, name, pascal } from "./naming.js";
 import { opName } from "./outcome-codecs.js";
 import { acceptRequest } from "./provider-request.js";
-import { httpResponse, outcomeBranches } from "./provider-response.js";
+import { outcomeSwitch, renderResponseMethods } from "./provider-response.js";
 
 /** Native HTTP request acceptance and response serialization
  * @param c - Target context
@@ -32,26 +32,13 @@ export function renderHttpProvider(c: CSharpContext, operation: Operation): stri
     acceptRequest(c, operation),
     `}, exception => exception is HttpRequestException or IOException ? new ${failure}.Communication(new("request-communication")) : throw exception)`,
     `.Bind(decoded => decoded is ${accepted}.Succeeded accepted ? ${direct}(accepted.Value.Value, deadline) : fx.Fail<${opName(operation, "Success")}>(new ${failure}.InvalidInput(((${accepted}.Failed)decoded).Failure)))`,
-    ".Map(outcome => {",
-    outcomeBranches(
-      operation,
-      false,
-      "outcome",
-      (outcome) => httpResponse(c, operation, outcome),
-      "Invalid handler success",
-    ),
-    "})",
-    ".Recover(failure => {",
-    `if (failure is not ${failure}.Declared declared) return fx.Fail<HttpResponseMessage>(failure);`,
-    "return fx.Sync<HttpResponseMessage>(() => {",
-    outcomeBranches(
-      operation,
-      true,
-      "declared.Rejection",
-      (outcome) => httpResponse(c, operation, outcome),
-      "Invalid handler rejection",
-    ),
-    "}); });",
+    `.Map(outcome => ${outcomeSwitch(operation, false, "outcome", "Http")})`,
+    ".Recover(failure => failure switch {",
+    `${failure}.InvalidInput invalid => fx.Fail<HttpResponseMessage>(invalid),`,
+    `${failure}.Communication communication => fx.Fail<HttpResponseMessage>(communication),`,
+    `${failure}.Declared declared => fx.Sync<HttpResponseMessage>(() => ${outcomeSwitch(operation, true, "declared.Rejection", "Http")}),`,
+    "});",
     "}",
+    renderResponseMethods(c, operation, "Http"),
   );
 }
