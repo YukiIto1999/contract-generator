@@ -6,18 +6,40 @@ export type Unit = "Types" | "Provider" | "Client";
  * @returns Reference items
  */
 function references(unit: Unit): string {
-  if (unit === "Types") return '<ProjectReference Include="$(TypeModelingProjectPath)" />';
-  return `<ProjectReference Include="../types/Contract.Types.csproj" />\n    <ProjectReference Include="$(EffectSystemProjectPath)" />`;
+  return unit === "Types"
+    ? '<ProjectReference Include="$(TypeModelingProjectPath)" />'
+    : '<ProjectReference Include="../types/Contract.Types.csproj" />\n    <ProjectReference Include="$(EffectSystemProjectPath)" />';
 }
 
 /** Guard that names the dependency source a unit needs
  * @param unit - Dependency role
- * @returns Error element
+ * @returns Dependency guard for effectful units
  */
 function requirement(unit: Unit): string {
-  return unit === "Types"
-    ? "<Error Condition=\"'$(TypeModelingProjectPath)' == ''\" Text=\"Supply TypeModelingProjectPath for TypeModeling v0.2.0 source\" />"
-    : "<Error Condition=\"'$(EffectSystemProjectPath)' == ''\" Text=\"Supply EffectSystemProjectPath for EffectSystem v0.2.0 source\" />";
+  if (unit === "Types") return "";
+  return `<Target Name="RequireContractDependencies" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(EffectSystemProjectPath)' == ''" Text="Supply EffectSystemProjectPath for EffectSystem v0.2.0 source" />
+  </Target>`;
+}
+
+/** Shared build-time enforcement for generated projects and their consumers
+ * @returns Importable analyzer attachment and exhaustiveness error policy
+ */
+export function analysisProps(): string {
+  return `<Project>
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);CS8509;CS8524;CS8655;CS8846;CS8847;TYPMOD001</WarningsAsErrors>
+    <_TypeModelingProjectDirectory Condition="'$(TypeModelingProjectPath)' != ''">$([System.IO.Path]::GetDirectoryName($([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(TypeModelingProjectPath)'))))</_TypeModelingProjectDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(_TypeModelingProjectDirectory)/../TypeModeling.Analyzers/TypeModeling.Analyzers.csproj" Condition="'$(TypeModelingProjectPath)' != ''" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+  <Target Name="RequireContractAnalysis" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(TypeModelingProjectPath)' == ''" Text="Supply TypeModelingProjectPath for TypeModeling v0.2.0 source and its analyzer" />
+    <Error Condition="'$(TypeModelingProjectPath)' != '' And !Exists('$(_TypeModelingProjectDirectory)/../TypeModeling.Analyzers/TypeModeling.Analyzers.csproj')" Text="TypeModeling.Analyzers must be present beside the TypeModeling source project" />
+  </Target>
+</Project>
+`;
 }
 
 /** Generated dependency-unit project
@@ -35,12 +57,11 @@ export function project(unit: Unit): string {
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>Contract.${unit}</AssemblyName>
   </PropertyGroup>
+  <Import Project="../Contract.Analysis.props" />
   <ItemGroup>
     ${references(unit)}
   </ItemGroup>
-  <Target Name="RequireContractDependencies" BeforeTargets="PrepareForBuild">
-    ${requirement(unit)}
-  </Target>
+  ${requirement(unit)}
 </Project>
 `;
 }

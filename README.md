@@ -163,7 +163,26 @@ The module named by `typescript-effect-module` exports `Effect<Env, E, A>`, call
 
 The generated projects reference TypeModeling and EffectSystem from source checkouts at their `v0.2.0` tags, placed side by side as `typemodeling-dotnet/` and `effectsystem-dotnet/`.
 Pass the project paths as the MSBuild properties `TypeModelingProjectPath` and `EffectSystemProjectPath`.
+All three generated projects import `csharp/Contract.Analysis.props`, which attaches the existing `TypeModeling.Analyzers` project and makes exhaustiveness diagnostics errors without adding analyzer assemblies as runtime dependencies.
+MSBuild does not propagate analyzer references or warning policies through a project reference, so every consumer project must import the same generated file.
+Inside the consuming SDK project, set `GeneratedContractRoot` to the generated output directory relative to that project, and add:
+
+```xml
+<PropertyGroup>
+  <GeneratedContractRoot>../generated</GeneratedContractRoot>
+</PropertyGroup>
+<Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+<ItemGroup>
+  <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
+</ItemGroup>
+```
+
+Supply `TypeModelingProjectPath` before the import, as above; the consumer uses the same source checkout as the generated projects.
+The shared import rejects a missing analyzer project rather than silently omitting the check.
+Generated switches over closed types enumerate every variant without a default or discard arm.
+The pinned analyzer rejects an omitted variant and a switch statement over a closed type, but does not prohibit a consumer's catchall switch-expression arm.
 EffectSystem `v0.2.0` has no deadline type, so each operation takes a `DateTimeOffset? deadline` and passes it on unchanged, and the host owns the timer.
+This deadline representation does not yet satisfy the standard's `Deadline` integration in `languages/csharp/connection.md` and `languages/csharp/coordination.md`; replacing it requires a compatible EffectSystem release that owns the deadline and its execution policy.
 
 ### Rust
 

@@ -216,15 +216,16 @@ function applyUnion(c: CSharpContext, needs: ReadonlySet<string>, node: UnionTyp
       [["value", "Validated union"]],
       "Union whose payload has omitted defaulted members filled",
     ),
-    `internal static ${t} ${applyMethod(c, node.id)}(${t} value) {`,
-    ...node.variants
-      .filter((variant) => needs.has(variant.type.id))
-      .map((variant, index) => {
-        const record = `${t}.${name(pascal(variant.name))}`;
-        return `if (value is ${record} variant${index}) return ${record}.Complete(${applyUse(c, needs, variant.type, `variant${index}.Value`)});`;
-      }),
-    "return value;",
-    "}",
+    `internal static ${t} ${applyMethod(c, node.id)}(${t} value) => value switch {`,
+    ...node.variants.map((variant, index) => {
+      const record = `${t}.${name(pascal(variant.name))}`;
+      const value = `variant${index}`;
+      const applied = needs.has(variant.type.id)
+        ? `${record}.Complete(${applyUse(c, needs, variant.type, `${value}.Value`)})`
+        : value;
+      return `${record} ${value} => ${applied},`;
+    }),
+    "};",
   );
 }
 

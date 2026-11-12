@@ -158,36 +158,57 @@ function readMembers(cases: readonly Case[], t: string): string {
   );
 }
 
-/** Writer member
+/** Output of one validated mixed-enumeration member
+ * @param entry - Case
+ * @param t - Public representation
+ * @returns Unit-valued writer declaration
+ */
+function writeCase(entry: Case, t: string): string {
+  let statement: string;
+  switch (entry.kind) {
+    case "string":
+      statement = "writer.WriteStringValue(value.Value);";
+      break;
+    case "number":
+      statement = "writer.WriteRawValue(value.Value.Text);";
+      break;
+    case "boolean":
+      statement = "writer.WriteBooleanValue(value.Value);";
+      break;
+    case "null":
+      statement = "writer.WriteNullValue();";
+      break;
+  }
+  return lines(
+    doc("Validated mixed member output", ["writer", "value"], "Completed output"),
+    `private static global::TypeModeling.Domain.Unit Write${entry.record}(Utf8JsonWriter writer, ${t}.${entry.record} value) {`,
+    statement,
+    "return global::TypeModeling.Domain.Unit.Value;",
+    "}",
+  );
+}
+
+/** Exhaustive writer of the closed mixed-enumeration family
  * @param cases - Cases
  * @param t - Public representation
- * @returns Codec member
+ * @returns Writer with unit-valued case completions
  */
 function writeMember(cases: readonly Case[], t: string): string {
-  const writer = (entry: Case): string => {
-    const variable = entry.record.toLowerCase();
-    switch (entry.kind) {
-      case "string":
-        return `writer.WriteStringValue(${variable}.Value);`;
-      case "number":
-        return `writer.WriteRawValue(${variable}.Value.Text);`;
-      case "boolean":
-        return `writer.WriteBooleanValue(${variable}.Value);`;
-      case "null":
-        return "writer.WriteNullValue();";
-    }
-  };
   return lines(
     doc("Closed member JSON output", ["writer", "value", "binding", "encoding"], undefined, {
-      throws: [["InvalidOperationException", "A value outside the closed hierarchy"]],
+      throws: [
+        [
+          "System.Runtime.CompilerServices.SwitchExpressionException",
+          "A value outside the closed hierarchy",
+        ],
+      ],
     }),
     `internal static void Write(Utf8JsonWriter writer, ${t} value, string binding, string? encoding) {`,
-    ...cases.map(
-      (entry) =>
-        `if (value is ${t}.${entry.record}${entry.storage === undefined ? "" : ` ${entry.record.toLowerCase()}`}) { ${writer(entry)} return; }`,
-    ),
-    `throw new InvalidOperationException("Invalid closed enumeration");`,
+    "_ = value switch {",
+    ...cases.map((entry) => `${t}.${entry.record} member => Write${entry.record}(writer, member),`),
+    "};",
     "}",
+    ...cases.map((entry) => writeCase(entry, t)),
   );
 }
 

@@ -164,7 +164,28 @@ tsp compile main.tsp
 生成する project は、TypeModeling と EffectSystem を、`v0.2.0` の tag の source checkout から参照する。
 二つの checkout は `typemodeling-dotnet/` と `effectsystem-dotnet/` の名前で隣に並べる。
 project の path は、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` で渡す。
+生成する三つの project は `csharp/Contract.Analysis.props` を import し、既存の `TypeModeling.Analyzers` を参照して網羅性の診断をエラーにする。
+analyzer の assembly は実行時の依存には含めない。
+MSBuild の project 参照では analyzer の参照と警告の方針が伝播しないため、利用側の各 project も同じ生成ファイルを import する。
+利用側の SDK project 内で、`GeneratedContractRoot` をその project から見た生成出力への相対 path とし、次を追加する。
+
+```xml
+<PropertyGroup>
+  <GeneratedContractRoot>../generated</GeneratedContractRoot>
+</PropertyGroup>
+<Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+<ItemGroup>
+  <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
+</ItemGroup>
+```
+
+`TypeModelingProjectPath` は前述のとおり import より前に渡し、生成した project と同じ source checkout を参照する。
+共有した import は、analyzer の project がない場合に検査を黙って省かず、エラーにする。
+閉じた型の switch は全 variant を列挙し、default・discard の arm を置かない。
+固定した analyzer は、variant の欠落と閉じた型に対する switch 文を拒否するが、利用側が switch 式に書く catchall の arm までは禁止しない。
 EffectSystem `v0.2.0` には期限の型がないので、各操作は `DateTimeOffset? deadline` を受け取ってそのまま引き渡し、timer は host が所有する。
+この期限の表現は、標準の `languages/csharp/connection.md` と `languages/csharp/coordination.md` が定める `Deadline` との接続を満たしていない。
+置換には、期限とその実行方針を所有する互換性のある EffectSystem の release が必要である。
 
 ### Rust
 
