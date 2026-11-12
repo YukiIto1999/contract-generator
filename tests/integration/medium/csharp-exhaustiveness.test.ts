@@ -67,3 +67,14 @@ nativeTest("rejects a consumer closed-type switch statement with TYPMOD001 as an
     build.output,
   ).toEqual(["error TYPMOD001"]);
 });
+
+nativeTest("rejects an unconstructed consumer Effect with EFFSYS008 as an error", () => {
+  const build = buildCSharpProject(contract.fixture(), "ExhaustivenessProbe.csproj", {
+    Probe: "UnconstructedEffect",
+  });
+  expect(build.status, build.output).not.toBe(0);
+  expect(
+    generatedDiagnostics(build).map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    build.output,
+  ).toEqual(["error EFFSYS008"]);
+});

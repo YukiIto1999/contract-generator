@@ -5,4 +5,5 @@
     <BaseOutputPath>bin/$(MSBuildProjectName)/</BaseOutputPath>
   </PropertyGroup>
   <Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" Condition="'$(EffectSystemProjectPath)' != ''" />
 </Project>

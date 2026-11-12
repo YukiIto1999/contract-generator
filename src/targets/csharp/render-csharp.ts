@@ -11,7 +11,7 @@ import { CSharpContext } from "./context.js";
 import { collectIssues } from "./issues.js";
 import { lines, name } from "./naming.js";
 import { renderOperationTypes } from "./outcomes.js";
-import { analysisProps, project } from "./project-files.js";
+import { analysisProps, effectAnalysisProps, project } from "./project-files.js";
 import { acceptanceNodes, renderProviderDefaults } from "./provider-defaults.js";
 import { renderProvider } from "./provider-unit.js";
 import { renderType } from "./render-type.js";
@@ -96,6 +96,7 @@ export function renderCSharp(
   const namespace = options.csharpNamespace.split(".").map(name).join(".");
   return Ok([
     { path: "csharp/Contract.Analysis.props", content: analysisProps() },
+    { path: "csharp/Contract.EffectAnalysis.props", content: effectAnalysisProps() },
     { path: "csharp/types/Contract.Types.csproj", content: project("Types") },
     { path: "csharp/types/ContractTypes.cs", content: typesSource(c, namespace) + "\n" },
     { path: "csharp/provider/Contract.Provider.csproj", content: project("Provider") },
