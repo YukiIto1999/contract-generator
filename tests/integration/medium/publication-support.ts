@@ -35,10 +35,11 @@ export function usePublicationSandbox(): PublicationSandbox {
   return sandbox;
 }
 
-/** State that a crash between the two renames of a replacement leaves behind
+/** Interrupted displacement layout after independently verified manual ownership release
  *
- * The published tree moves into a sibling workspace named after the output, a completed
- * staged tree sits beside it, and the output path no longer exists.
+ * Recovery fixtures omit the ownership marker only after its separate manual release
+ * The previous published tree remains in a sibling workspace
+ * The staged directory has no unverified contents
  * @param output - Existing published output directory
  * @param suffix - Six-character random part of the workspace name
  * @returns Path of the leftover workspace

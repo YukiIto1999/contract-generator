@@ -1,12 +1,11 @@
-import { lstat, readdir, rename } from "node:fs/promises";
+import { lstat, readdir, rename, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Err, Ok, type Result } from "ts-results-es";
 import { compareText } from "../model/ordering.js";
-import { isMissing } from "./filesystem-error.js";
+import { isFilesystemError, isMissing } from "./filesystem-error.js";
 import { inspectOutput, type ExistingOutput } from "./inspect-output.js";
 import { refusal, type PublicationFailure } from "./publication-result.js";
 import {
-  discardWorkspace,
   suffixLength,
   workspaceAt,
   workspacePrefix,
@@ -17,7 +16,7 @@ import {
 export interface RecoveredOutput {
   /** Verified previous destination, restored from an interrupted publication when it was missing */
   readonly previous: ExistingOutput | undefined;
-  /** Owned temporary paths retained after a cleanup failure */
+  /** Recovery workspace paths retained for safe manual inspection */
   readonly retainedPaths: readonly string[];
 }
 
@@ -52,6 +51,8 @@ async function displacedWorkspaces(root: string): Promise<Workspace[]> {
   for (const name of names.filter((entry) => isWorkspaceName(entry, prefix)).sort(compareText)) {
     const workspace = workspaceAt(join(dirname(root), name));
     try {
+      const stat = await lstat(workspace.path);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
       await lstat(workspace.displaced);
       found.push(workspace);
     } catch (error) {
@@ -59,6 +60,23 @@ async function displacedWorkspaces(root: string): Promise<Workspace[]> {
     }
   }
   return found;
+}
+
+/** Cleanup without deleting files of an interrupted attempt with unknown ownership
+ * @param workspace - Workspace whose previous tree has been restored
+ * @returns Workspace path when any unverified contents remain
+ * @throws {@link Error} A non-filesystem defect during empty-directory cleanup
+ */
+async function discardRecoveredWorkspace(workspace: Workspace): Promise<readonly string[]> {
+  for (const path of [workspace.staged, workspace.path]) {
+    try {
+      await rmdir(path);
+    } catch (error) {
+      if (!isFilesystemError(error)) throw error;
+      if (!isMissing(error)) return [workspace.path];
+    }
+  }
+  return [];
 }
 
 /** Return of an interrupted attempt's previous tree to the missing output path
@@ -81,18 +99,19 @@ async function restoreFromWorkspace(
       ),
     );
   await rename(workspace.displaced, root);
-  const retainedPaths = await discardWorkspace(workspace, true);
+  const retainedPaths = await discardRecoveredWorkspace(workspace);
   return Ok({ previous: inspected.value, retainedPaths });
 }
 
-/** Recovery of a previous output that an interrupted replacement displaced
+/** Exclusive recovery of a manifest-verified previous output after manual ownership release
  *
- * Replacement moves the previous tree into a sibling workspace and then moves the new tree
- * into place, so an interruption between the two moves leaves the output missing and the
- * previous tree in the workspace. The tree is restored only when it verifies as owned and
- * unmodified and exactly one workspace of this output holds one.
- * @param root - Absolute output directory that does not exist
- * @returns The restored destination, nothing to restore, or a refusal that names the leftovers
+ * An interruption between renames may leave the output missing with its previous tree
+ * in a sibling workspace
+ * The caller must already hold exclusive ownership before inspecting recovery workspaces
+ * Abandoned ownership requires independent verification before manual release
+ * Unverified workspace files remain available for manual inspection
+ * @param root - Missing canonical-parent output path under exclusive publication ownership
+ * @returns Restored destination or typed refusal with preserved recovery paths
  * @throws {@link Error} Filesystem failure while inspecting or restoring the leftovers
  */
 export async function restoreInterrupted(

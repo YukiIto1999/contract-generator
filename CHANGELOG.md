@@ -13,4 +13,5 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Concurrent generators now refuse ownership conflicts instead of racing output replacement or recovering an active publisher's backup; read-only checks do not acquire ownership, and abandoned ownership requires verified manual recovery.
 - Generated C# projects now use exhaustive closed-type switches and ship `csharp/Contract.Analysis.props`; every consumer imports that same analyzer attachment and error policy so omitted variants fail compilation without adding analyzer assemblies to runtime dependencies.

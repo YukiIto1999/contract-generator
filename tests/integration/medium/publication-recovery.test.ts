@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { publishOutput } from "../../../src/publication/publish-output.js";
@@ -78,4 +78,29 @@ test("workspaces of another output and workspaces without a displaced tree are l
   await mkdir(join(parent, partial, "staged"), { recursive: true });
   expect((await publishOutput(output, first, false)).unwrap().changed).toBe(true);
   expect((await readdir(parent)).sort()).toEqual([...untouched, partial, "out"].sort());
+});
+
+test("recovery preserves unverified workspace files instead of recursively deleting them", async () => {
+  const { output, parent } = sandbox;
+  await publishOutput(output, first, false);
+  const workspace = await interruptReplacement(output);
+  await writeFile(join(workspace, "staged/notes.txt"), "mine\n");
+  const receipt = (await publishOutput(output, first, false)).unwrap();
+  expect(receipt).toEqual({ changed: false, retainedPaths: [workspace] });
+  expect(await readFile(join(output, "typescript/contract.ts"), "utf8")).toBe("first\n");
+  expect(await readFile(join(workspace, "staged/notes.txt"), "utf8")).toBe("mine\n");
+  expect((await readdir(parent)).sort()).toEqual([basename(workspace), "out"].sort());
+});
+
+test("recovery never traverses a matching workspace symbolic link", async () => {
+  const { output, parent } = sandbox;
+  const unrelated = join(parent, "unrelated");
+  await publishOutput(join(unrelated, "previous"), first, false);
+  const linked = join(parent, ".out.contract-generator-publish-Abc123");
+  await symlink(unrelated, linked, "dir");
+  expect((await publishOutput(output, second, false)).unwrap().changed).toBe(true);
+  expect(await readFile(join(unrelated, "previous/typescript/contract.ts"), "utf8")).toBe(
+    "first\n",
+  );
+  expect((await readdir(parent)).sort()).toEqual([basename(linked), "out", "unrelated"].sort());
 });

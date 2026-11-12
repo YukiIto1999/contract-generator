@@ -133,8 +133,14 @@ tsp compile main.tsp
 
 The emitter owns its output directory.
 It refuses a directory that it did not generate and a generated file that was edited by hand.
-It replaces the whole directory at once, and when a replacement was interrupted it restores the previous output on the next run.
-Run it with `check: true` in the verification entry of the consuming repository to detect drift.
+Publication excludes other cooperating generators with a sibling `.<output>.contract-generator.lock` ownership marker.
+A competing generation or drift check fails with `output-conflict`; it does not wait or take over ownership.
+Replacement moves the old tree aside before installing the new one, so readers outside this protocol can observe a missing directory between the two moves.
+This is not an atomic swap or a power-loss durability guarantee.
+Normal completion releases ownership, but a killed process can leave the marker and its previous output behind.
+The emitter reports this conflict without deleting the marker; recovery requires confirming that no owner remains and preserving any reported backup before removing the abandoned marker.
+With exclusive ownership and a missing output, a normal generation restores a single verified, unmodified previous tree before continuing.
+Run it with `check: true` in the verification entry of the consuming repository to detect drift without creating ownership or recovering interrupted output.
 
 ## Output
 
