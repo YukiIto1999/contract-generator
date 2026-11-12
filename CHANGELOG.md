@@ -17,3 +17,4 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Generated C# projects now use exhaustive closed-type switches and ship `csharp/Contract.Analysis.props`; every consumer imports that same analyzer attachment and error policy so omitted variants fail compilation without adding analyzer assemblies to runtime dependencies.
 - Generated C# provider and client projects now attach the dependency's EffectSystem analyzer; `csharp/Contract.EffectAnalysis.props` supplies the same build-time checks to effect consumers.
 - C# setup instructions now pass dependency paths to referenced projects explicitly.
+- Declared a finite verification time budget for the existing full verification entry, based on measured native-test runs.
