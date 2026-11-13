@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { renderProjections } from "../projections/render-projections.js";
+import { renderProjections } from "../../../projections/render-projections.js";
 import {
   compileSource,
   issuesFrom,

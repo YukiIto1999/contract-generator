@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { compareText } from "../model/ordering.js";
+import { compareText } from "../../../model/ordering.js";
 import { codesFrom, issuesFrom, modelFrom, objectFrom } from "./profile-source.fixture.js";
 
 test("modern discriminator metadata is normalized without implicit wire fields", async () => {

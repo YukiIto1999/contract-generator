@@ -25,9 +25,11 @@
     "typecheck": "node node_modules/typescript-native/bin/tsc --noEmit",
     "check": "vp check",
     "format": "vp fmt",
-    "test": "vp test run",
-    "verify": "npm run build && npm run typecheck && npm run check && npm test",
-    "prepare:native": "node scripts/prepare-native-fixtures.ts"
+    "test": "node scripts/verification/run.ts test",
+    "verify": "node scripts/verification/run.ts verify",
+    "verify:push": "node scripts/verification/run.ts verify:push",
+    "prepare:native": "node scripts/prepare-native-fixtures.ts",
+    "audit:native": "node scripts/audit-native-packages.ts"
   },
   "dependencies": {
     "@eslint-community/regexpp": "4.12.3",

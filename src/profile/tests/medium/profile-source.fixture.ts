@@ -3,21 +3,24 @@ import type { Program } from "@typespec/compiler";
 import { createTester, mockFile, type Tester } from "@typespec/compiler/testing";
 import type { Result } from "ts-results-es";
 import { expect } from "vite-plus/test";
-import declarations from "../../lib/main.tsp?raw";
-import commonFixture from "../../tests/fixtures/contracts/main.tsp?raw";
+import declarations from "../../../../lib/main.tsp?raw";
+import commonFixture from "../../../../tests/fixtures/contracts/main.tsp?raw";
 import type {
   ContractModel,
   GenerationIssue,
   ObjectType,
   ScalarType,
-} from "../model/contract-model.js";
-import { compileContract } from "./compile-contract.js";
-import { $decorators, $lib } from "./library.js";
+} from "../../../model/contract-model.js";
+import { compileContract } from "../../compile-contract.js";
+import { $decorators, $lib } from "../../library.js";
 
 /** Real compiler test filesystem with the actual decorator implementation */
-export const tester: Tester = createTester(fileURLToPath(new URL("../../", import.meta.url)), {
-  libraries: [],
-})
+export const tester: Tester = createTester(
+  fileURLToPath(new URL("../../../../", import.meta.url)),
+  {
+    libraries: [],
+  },
+)
   .files({
     "lib/main.tsp": declarations,
     "dist/index.js": mockFile.js({ $lib, $decorators }),

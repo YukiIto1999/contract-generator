@@ -19,5 +19,11 @@
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "vite.config.ts"],
+  "files": [
+    "tests/fixtures/tauri/run.ts",
+    "tests/fixtures/tauri/process.ts",
+    "tests/fixtures/tauri/materialize.ts",
+    "tests/fixtures/tauri/vite.config.ts"
+  ],
   "exclude": ["tests/fixtures", "work", "dist", "node_modules"]
 }

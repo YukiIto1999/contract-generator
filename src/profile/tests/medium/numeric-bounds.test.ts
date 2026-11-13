@@ -1,13 +1,13 @@
 import { expect, test } from "vite-plus/test";
-import type { Constraints } from "../model/contract-model.js";
-import type { IssueSink } from "./issue-sink.js";
+import type { Constraints } from "../../../model/contract-model.js";
+import type { IssueSink } from "../../issue-sink.js";
 import {
   checkIntegerDomain,
   compareNumbers,
   inclusive,
   isIntegral,
   plainNumber,
-} from "./numeric-bounds.js";
+} from "../../numeric-bounds.js";
 import { compileSource } from "./profile-source.fixture.js";
 
 /** Declaration that owns the domain under test, as a real compiler target */

@@ -11,17 +11,14 @@ import type {
 } from "../../../../src/model/contract-model.js";
 import { compileContract } from "../../../../src/profile/compile-contract.js";
 import { $decorators, $lib } from "../../../../src/profile/library.js";
+
 import { rustFixtureFiles, type FixtureName } from "../../../fixtures/rust/materialize.js";
+import {
+  assertCleanCargo,
+  type CompilerMessage,
+} from "../../../../scripts/verification/cargo-diagnostics.ts";
 import { field, repository } from "./protocol.js";
 import { requireRustToolchain } from "./toolchain.js";
-
-/** Rust compiler diagnostic of a path package */
-export interface CompilerMessage {
-  readonly level: string;
-  readonly code: string | null;
-  readonly rendered: string;
-  readonly source: string;
-}
 
 /** Temporary checkout of written crates and the Cargo output directory of their builds */
 export interface Checkout {
@@ -143,7 +140,7 @@ export function compilerMessages(stdout: string): CompilerMessage[] {
     });
 }
 
-/** Cargo invocation with isolated intermediate and final build directories
+/** Cargo invocation without the host checkout's managed intermediate directory
  * @param native - Checkout owning the crates
  * @param args - Cargo arguments
  * @param json - Request Cargo's machine-readable diagnostics
@@ -154,16 +151,14 @@ export function cargo(
   args: readonly string[],
   json = true,
 ): SpawnSyncReturns<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, CARGO_TARGET_DIR: native.target };
+  delete env.CARGO_BUILD_BUILD_DIR;
   return spawnSync("cargo", [...args, ...(json ? ["--message-format=json"] : [])], {
     cwd: native.root,
     encoding: "utf8",
     timeout: 900_000,
     maxBuffer: 1 << 28,
-    env: {
-      ...process.env,
-      CARGO_TARGET_DIR: native.target,
-      CARGO_BUILD_BUILD_DIR: join(native.target, "intermediate"),
-    },
+    env,
   });
 }
 
@@ -175,14 +170,7 @@ export function cargo(
  */
 export function cleanCargo(native: Checkout, subcommand: string, args: readonly string[]): string {
   const outcome = cargo(native, [subcommand, "--offline", ...args]);
-  const warnings = compilerMessages(outcome.stdout)
-    .filter((message) => message.source.startsWith(native.root) && message.level === "warning")
-    .map((message) => message.rendered);
-  expect({
-    status: outcome.status,
-    stderr: outcome.status === 0 ? "" : outcome.stderr,
-    warnings,
-  }).toEqual({ status: 0, stderr: "", warnings: [] });
+  assertCleanCargo(native.root, outcome, compilerMessages(outcome.stdout));
   return outcome.stdout;
 }
 
@@ -199,10 +187,15 @@ export async function writeCheckout(
   const root = join(base, "checkout");
   const shared = process.env.RUST_CONTRACT_TARGET_DIR;
   const target = shared === undefined ? join(base, "target") : join(shared, prefix);
-  for (const file of files) {
-    const path = join(root, file.path);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, file.content);
+  try {
+    for (const file of files) {
+      const path = join(root, file.path);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.content);
+    }
+  } catch (failure) {
+    await rm(base, { recursive: true, force: true });
+    throw failure;
   }
   return { base, root, target };
 }

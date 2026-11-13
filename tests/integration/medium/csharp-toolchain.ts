@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { GeneratedFile } from "../../../src/model/contract-model.js";
 import { renderCSharp } from "../../../src/targets/csharp/render-csharp.js";
 import { options } from "../../../src/targets/csharp/test-models.js";
+import { auditReceiptProblem, requireAuditedPackages } from "./csharp-audit.js";
 import { contractModel } from "./csharp-contract.js";
 
 /** Independent fixture directory shipped with the generator tests */
@@ -50,6 +51,8 @@ export function detectCSharpToolchain(): CSharpToolchain {
         `${variable} points at ${path}, which does not exist (run \`npm run prepare:native\`)`,
       );
   }
+  const audit = auditReceiptProblem();
+  if (audit !== undefined) return unavailable(audit);
   return { available: true };
 }
 
@@ -81,6 +84,8 @@ export interface CSharpFixture {
   readonly generatedRoot: string;
   /** Copy of `tests/fixtures/csharp` without prior build output */
   readonly fixtureRoot: string;
+  /** SDK artifacts directory owning every `bin` and `obj` of this fixture, its generated units and the dependency projects they reference */
+  readonly artifactsRoot: string;
 }
 
 /** Writing generated files and a clean fixture-project copy into a test-owned directory
@@ -94,6 +99,7 @@ export async function provisionCSharpFixture(
 ): Promise<CSharpFixture> {
   const generatedRoot = join(root, "generated");
   const fixtureRoot = join(root, "fixture");
+  const artifactsRoot = join(root, "artifacts");
   for (const file of files) {
     const path = join(generatedRoot, file.path);
     await mkdir(dirname(path), { recursive: true });
@@ -101,9 +107,9 @@ export async function provisionCSharpFixture(
   }
   await cp(fixtureSource, fixtureRoot, {
     recursive: true,
-    filter: (source) => !/^(bin|obj)$/.test(source.split("/").pop() ?? ""),
+    filter: (source) => !/^(bin|obj|artifacts)$/.test(source.split("/").pop() ?? ""),
   });
-  return { root, generatedRoot, fixtureRoot };
+  return { root, generatedRoot, fixtureRoot, artifactsRoot };
 }
 
 /** Environment forcing stable English compiler messages without changing caller-owned toolchain settings */
@@ -135,26 +141,12 @@ function parseDiagnostics(output: string): readonly BuildDiagnostic[] {
   return diagnostics;
 }
 
-/** Native build of one fixture project against the generated contract
+/** One native `dotnet` command in the fixture copy
  * @param fixture - Provisioned directories
- * @param project - Project file name inside the fixture copy
- * @param properties - Additional MSBuild properties
+ * @param args - Command line after the `dotnet` executable
  * @returns Exit status and unique diagnostics
  */
-export function buildCSharpProject(
-  fixture: CSharpFixture,
-  project: string,
-  properties: Readonly<Record<string, string>> = {},
-): NativeBuild {
-  const args = [
-    "build",
-    join(fixture.fixtureRoot, project),
-    `-p:GeneratedContractRoot=${fixture.generatedRoot}`,
-    ...Object.entries(properties).map(([key, value]) => `-p:${key}=${value}`),
-    "--disable-build-servers",
-    "-nologo",
-    "-v:minimal",
-  ];
+function runDotnet(fixture: CSharpFixture, args: readonly string[]): NativeBuild {
   const run = spawnSync("dotnet", args, {
     cwd: fixture.fixtureRoot,
     encoding: "utf8",
@@ -169,13 +161,46 @@ export function buildCSharpProject(
   };
 }
 
+/** Native build of one fixture project against the generated contract
+ *
+ * The restore runs offline: the medium sandbox has no route to a NuGet source, so it cannot obtain the vulnerability data that a restore audit needs.
+ * The audit of exactly these packages belongs to `npm run audit:native`, so this restore leaves it out and refuses any package that the audit receipt does not cover.
+ * @param fixture - Provisioned directories whose artifacts root receives every output, including those of referenced dependency projects
+ * @param project - Project file name inside the fixture copy
+ * @param properties - Additional MSBuild properties
+ * @returns Exit status and unique diagnostics of the restore and the build without restore
+ * @throws {@link Error} A restore that resolved a package which `npm run audit:native` did not audit
+ */
+export function buildCSharpProject(
+  fixture: CSharpFixture,
+  project: string,
+  properties: Readonly<Record<string, string>> = {},
+): NativeBuild {
+  const shared = [
+    join(fixture.fixtureRoot, project),
+    "--artifacts-path",
+    fixture.artifactsRoot,
+    `-p:GeneratedContractRoot=${fixture.generatedRoot}`,
+    ...Object.entries(properties).map(([key, value]) => `-p:${key}=${value}`),
+    "--disable-build-servers",
+    "-nologo",
+    "-v:minimal",
+  ];
+  const restore = runDotnet(fixture, ["restore", ...shared, "-p:NuGetAudit=false"]);
+  if (restore.status !== 0) return restore;
+  requireAuditedPackages(fixture.artifactsRoot);
+  const build = runDotnet(fixture, ["build", ...shared, "--no-restore"]);
+  const output = `${restore.output}${build.output}`;
+  return { status: build.status, diagnostics: parseDiagnostics(output), output };
+}
+
 /** Built fixture assembly location
  * @param fixture - Provisioned directories
  * @param name - Fixture project name without extension
  * @returns Absolute main assembly path
  */
 export function driverAssembly(fixture: CSharpFixture, name: string): string {
-  return join(fixture.fixtureRoot, "bin", name, "Debug", "net10.0", `${name}.dll`);
+  return join(fixture.artifactsRoot, "bin", name, "debug", `${name}.dll`);
 }
 
 /** Source checkouts of the pinned dependencies, whose own diagnostics are not generated code
