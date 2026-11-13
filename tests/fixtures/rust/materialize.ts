@@ -5,6 +5,7 @@ import type {
   EmissionOptions,
   GeneratedFile,
 } from "../../../src/model/contract-model.js";
+import { rustRecursionLimit } from "../../../src/targets/rust/compiler-limits.js";
 import { rustDependencies } from "../../../src/targets/rust/dependencies.js";
 import { renderRust } from "../../../src/targets/rust/render-rust.js";
 
@@ -33,10 +34,14 @@ const probes: Readonly<Record<FixtureName, readonly Probe[]>> = {
 
 /** Fixture source text relative to this directory
  * @param path - Path below the Rust fixture directory
+ * @param recursionLimit - Model-derived compile-time allowance for an independent crate root
  * @returns File content
  */
-function source(path: string): string {
-  return readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+function source(path: string, recursionLimit?: number): string {
+  const content = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  return recursionLimit === undefined
+    ? content
+    : `#![recursion_limit = "${recursionLimit}"]\n${content}`;
 }
 
 /** Manifest of the types-only codec crate
@@ -92,27 +97,50 @@ export function rustFixtureFiles(
 ): readonly GeneratedFile[] {
   const prefix = options.rustCratePrefix;
   const list = probes[fixture];
+  const recursionLimit = rustRecursionLimit(model);
   const construction =
     fixture === "sample"
       ? [
           {
             path: "rust/fixture-codec/tests/construction.rs",
-            content: source("sample/construction.rs"),
+            content: source("sample/construction.rs", recursionLimit),
           },
         ]
       : [];
   return [
     ...generated(model, options),
     { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(prefix, list) },
-    { path: "rust/fixture-codec/src/main.rs", content: source("common/codec_main.rs") },
+    {
+      path: "rust/fixture-codec/src/main.rs",
+      content: source("common/codec_main.rs", recursionLimit),
+    },
     { path: "rust/fixture-codec/src/codec.rs", content: source(`${fixture}/codec.rs`) },
     ...construction,
+    ...(fixture === "guarantees"
+      ? [
+          {
+            path: "rust/fixture-codec/tests/lifecycle.rs",
+            content: source("guarantees/lifecycle.rs", recursionLimit),
+          },
+          {
+            path: "rust/fixture-codec/tests/topology.rs",
+            content: source("guarantees/topology.rs", recursionLimit),
+          },
+          {
+            path: "rust/fixture-driver/tests/transport_lifecycle.rs",
+            content: source("guarantees/transport_lifecycle.rs", recursionLimit),
+          },
+        ]
+      : []),
     ...list.map((probe) => ({
       path: `rust/fixture-codec/src/bin/${probe.binary}.rs`,
-      content: source(`sample/probes/${probe.binary}.rs`),
+      content: source(`sample/probes/${probe.binary}.rs`, recursionLimit),
     })),
     { path: "rust/fixture-driver/Cargo.toml", content: driverManifest(prefix) },
-    { path: "rust/fixture-driver/src/main.rs", content: source("common/driver_main.rs") },
+    {
+      path: "rust/fixture-driver/src/main.rs",
+      content: source("common/driver_main.rs", recursionLimit),
+    },
     { path: "rust/fixture-driver/src/host.rs", content: source("common/host.rs") },
     { path: "rust/fixture-driver/src/contract.rs", content: source(`${fixture}/contract.rs`) },
   ];
@@ -131,7 +159,10 @@ export function rustSourceDataFiles(
   return [
     ...generated(model, options),
     { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(options.rustCratePrefix, []) },
-    { path: "rust/fixture-codec/src/main.rs", content: source("common/codec_main.rs") },
+    {
+      path: "rust/fixture-codec/src/main.rs",
+      content: source("common/codec_main.rs", rustRecursionLimit(model)),
+    },
     { path: "rust/fixture-codec/src/codec.rs", content: source("source-data/codec.rs") },
   ];
 }

@@ -6,6 +6,9 @@ import { renderClosed } from "./render-closed.js";
 import { renderObject } from "./render-object.js";
 import { renderScalar } from "./render-scalar.js";
 import { renderUnion } from "./render-union.js";
+import { renderDecode } from "./render-decode.js";
+import { renderEncode } from "./render-encode.js";
+import { renderOwnership } from "./render-ownership.js";
 import { typesPreamble, typesSupport } from "./runtime.js";
 import { reachable } from "./support.js";
 
@@ -35,7 +38,13 @@ function renderType(ctx: RustContext, type: ContractType): string {
  * @returns Rust declarations that still require the codec vocabulary
  */
 export function renderTypes(ctx: RustContext): string {
-  return ctx.model.types.map((type) => renderType(ctx, type)).join("\n") + renderAcceptance(ctx);
+  return (
+    ctx.model.types.map((type) => renderType(ctx, type)).join("\n") +
+    renderAcceptance(ctx) +
+    renderOwnership(ctx) +
+    renderDecode(ctx) +
+    renderEncode(ctx)
+  );
 }
 
 /** Complete types crate source retaining only reachable codec support

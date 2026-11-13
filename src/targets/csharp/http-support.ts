@@ -14,6 +14,7 @@ internal static partial class HttpWire
     /// <param name="text">Decoded JSON text</param>
     /// <returns>Whether the bytes are valid UTF-8</returns>
     internal static bool Utf8(byte[] bytes, out string text) {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) { text = ""; return false; }
         try { text = StrictUtf8.GetString(bytes); return true; }
         catch (DecoderFallbackException) { text = ""; return false; }
     }
@@ -32,14 +33,6 @@ internal static partial class HttpWire
     /// <returns>Whether the header occurs once with exactly this value</returns>
     internal static bool Header(HttpResponseMessage response, string key, string value) =>
         (response.Headers.TryGetValues(key, out var values) || response.Content.Headers.TryGetValues(key, out values)) && values.Count() == 1 && values.First() == value;
-    /// <summary>Scalar HTTP text extraction from encoded JSON</summary>
-    /// <param name="json">Validated scalar JSON</param>
-    /// <returns>Parameter text</returns>
-    internal static string Scalar(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.ValueKind == JsonValueKind.String ? document.RootElement.GetString()! : document.RootElement.GetRawText();
-    }
     /// <summary>Path segment that carries a parameter text unchanged</summary>
     /// <param name="text">Parameter text</param>
     /// <param name="segment">Percent-encoded segment</param>
@@ -104,17 +97,6 @@ internal static partial class HttpWire
             found = Uri.UnescapeDataString((pair.Length == 2 ? pair[1] : "").Replace('+', ' '));
         }
         return found;
-    }
-    /// <summary>Scalar HTTP text conversion through the standard JSON writer</summary>
-    /// <param name="text">HTTP parameter text</param>
-    /// <param name="asString">Whether the parameter is a JSON string</param>
-    /// <returns>JSON token for the generated codec</returns>
-    internal static string Token(string text, bool asString)
-    {
-        if (!asString) return text;
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream)) writer.WriteStringValue(text);
-        return Encoding.UTF8.GetString(stream.ToArray());
     }
     /// <summary>Single positioned violation of a request that never reached the codec</summary>
     /// <param name="path">Pointer of the offending value</param>

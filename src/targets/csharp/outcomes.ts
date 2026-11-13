@@ -28,7 +28,7 @@ function outcomeVariant(
       ? ""
       : lines(
           `var checkedValue = ${opName(operation, "OutcomeCodecs")}.Validate${outcome.name}(value);`,
-          `if (checkedValue is Result<Accepted<${payload}>, ContractFailure>.Failed failed) return new Result<Accepted<${family}>, ContractFailure>.Failed(failed.Failure);`,
+          `if (checkedValue.IsFailed(out var failed, out _)) return failed;`,
         );
   return lines(
     doc(outcome.description || `Canonical ${outcome.name} result`),
@@ -41,7 +41,7 @@ function outcomeVariant(
     doc("Typed outcome construction", parameters, "Outcome or positioned violations"),
     `public static Result<Accepted<${family}>, ContractFailure> Create(${argument}) {`,
     validate,
-    `return new Result<Accepted<${family}>, ContractFailure>.Succeeded(new(new ${variant}(${supplied}), ImmutableArray<UnknownProperty>.Empty));`,
+    `return Result.Succeeded<Accepted<${family}>>(new(new ${variant}(${supplied}), ImmutableArray<UnknownProperty>.Empty));`,
     "}",
     doc("Validated decoded outcome completion", parameters, "Completed outcome"),
     `internal static ${family} Complete(${argument}) => new ${variant}(${supplied});`,
@@ -63,7 +63,7 @@ function outcomeFamily(c: CSharpContext, operation: Operation, rejection: boolea
         ? `Declared rejection paths of ${operation.name}`
         : `Distinct success paths of ${operation.name}`,
     ),
-    `[ClosedUnion] public abstract record ${family} {`,
+    `[Closed] public abstract record ${family} {`,
     doc("Closed outcome completion"),
     `private ${family}() { }`,
     ...operation.outcomes
@@ -81,7 +81,7 @@ function failureFamily(operation: Operation): string {
   const failure = opName(operation, "Failure");
   return lines(
     doc(`Typed expected failures of ${operation.name}`),
-    `[ClosedUnion] public abstract record ${failure} {`,
+    `[Closed] public abstract record ${failure} {`,
     doc("Closed operation failure completion"),
     `private ${failure}() { }`,
     doc("Provider input rejection", [["Failure", "Positioned violations of the rejected input"]]),

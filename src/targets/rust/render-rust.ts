@@ -6,6 +6,7 @@ import type {
   GenerationIssue,
 } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
+import { rustRecursionLimit } from "./compiler-limits.js";
 import { createContext } from "./context.js";
 import { rustManifests } from "./dependencies.js";
 import { renderBinary } from "./render-binary.js";
@@ -36,15 +37,16 @@ export function renderRust(
     },
     options.rustCratePrefix,
   );
+  const allowance = `#![recursion_limit = "${rustRecursionLimit(model)}"]\n`;
   const files: GeneratedFile[] = [
     ...rustManifests(ctx.prefix),
     {
       path: "rust/types/src/lib.rs",
-      content: assembleTypes(renderTypes(ctx) + renderWire(ctx) + renderBinary(ctx)),
+      content: allowance + assembleTypes(renderTypes(ctx) + renderWire(ctx) + renderBinary(ctx)),
     },
-    { path: "rust/transport/src/lib.rs", content: renderTransport(ctx) },
-    { path: "rust/provider/src/lib.rs", content: renderProvider(ctx) },
-    { path: "rust/client/src/lib.rs", content: renderClient(ctx) },
+    { path: "rust/transport/src/lib.rs", content: allowance + renderTransport(ctx) },
+    { path: "rust/provider/src/lib.rs", content: allowance + renderProvider(ctx) },
+    { path: "rust/client/src/lib.rs", content: allowance + renderClient(ctx) },
     { path: "rust/README.md", content: renderReadme(ctx) },
   ];
   return Ok(files.toSorted((a, b) => compareText(a.path, b.path)));

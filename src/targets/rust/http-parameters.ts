@@ -33,7 +33,8 @@ function fieldEncoding(ctx: RustContext, field: Field): string {
  */
 export function parameterValue(ctx: RustContext, field: Field): string {
   const type = node(ctx, field.type.id);
-  const reparsed = "parse_json(&text).unwrap_or(Value::String(text))";
+  const reparsed =
+    "match parse_json(&text) { Ok(mut parsed) if parsed.nodes.len() == 1 => parsed.take(parsed.root), _ => _JsonNode::String(text) }";
   if (type.kind === "literal" || type.kind === "enum") {
     const members =
       type.kind === "literal" ? [type.value] : type.members.map((member) => member.value);
@@ -47,5 +48,5 @@ export function parameterValue(ctx: RustContext, field: Field): string {
     type.kind === "scalar" &&
     tokenKinds[type.scalar] === true &&
     fieldEncoding(ctx, field) !== "string";
-  return token ? reparsed : "Value::String(text)";
+  return token ? reparsed : "_JsonNode::String(text)";
 }

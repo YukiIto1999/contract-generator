@@ -105,7 +105,10 @@ nativeTest(
     const [direct, ipc, http] = await runDriver(
       sample.driver("OperationDriver"),
       (["direct", "ipc", "http"] as const).map((binding) =>
-        submit(binding, server().origin, envelope(1, "dl"), undefined, { deadline: at }),
+        submit(binding, server().origin, envelope(1, "dl"), undefined, {
+          deadline: at,
+          observeDeadline: true,
+        }),
       ),
     );
     const instant = (value: unknown): number =>
@@ -115,6 +118,31 @@ nativeTest(
       deadline.getTime(),
       deadline.getTime(),
     ]);
-    expect(http!.value).toBe("deadline:none");
+    expect([direct, ipc, http].map((result) => instant(result!.runtimeDeadline))).toEqual([
+      deadline.getTime(),
+      deadline.getTime(),
+      deadline.getTime(),
+    ]);
+    expect([direct, ipc, http].map((result) => result!.deadlineOverruns)).toEqual([0, 0, 0]);
+    expect([direct, ipc, http].map((result) => result!.exit)).toEqual([
+      "succeeded",
+      "succeeded",
+      "succeeded",
+    ]);
+  },
+);
+
+nativeTest(
+  "records an expired execution deadline and preserves the boundary's typed failure",
+  async () => {
+    const deadline = new Date(Date.now() - 60_000).toISOString();
+    const [result] = await runDriver(sample.driver("OperationDriver"), [
+      submit("direct", server().origin, envelope(1), undefined, {
+        deadline,
+        observeDeadline: true,
+      }),
+    ]);
+    expect(result).toMatchObject({ exit: "transport", reason: "deadline", deadlineOverruns: 1 });
+    expect(new Date(String(result!.runtimeDeadline)).getTime()).toBe(new Date(deadline).getTime());
   },
 );

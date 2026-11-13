@@ -191,7 +191,7 @@ export class CSharpContext {
           ? this.qualified(node.name)
           : this.literal(node.members[0]!.value);
       case "array":
-        return `ImmutableArray<${this.use(node.element)}>`;
+        return `${this.codec(node.id)}.Value`;
       case "object":
       case "union":
         return this.qualified(node.name);

@@ -72,7 +72,7 @@ fn numeric_compare(left: &str, right: &str) -> Option<Ordering> {
 /// - max_exclusive: strict upper boundary
 /// - path: rejected location
 /// - state: boundary-local sink
-fn check_number(text: &str, minimum: Option<&str>, min_exclusive: bool, maximum: Option<&str>, max_exclusive: bool, path: &str, state: &mut State) {
+fn check_number(text: &str, minimum: Option<&str>, min_exclusive: bool, maximum: Option<&str>, max_exclusive: bool, path: _Path, state: &mut State) {
     if minimum.is_some_and(|bound| numeric_compare(text, bound).is_none_or(|order| order.is_lt() || min_exclusive && order.is_eq())) { state.reject(path, "minimum"); }
     if maximum.is_some_and(|bound| numeric_compare(text, bound).is_none_or(|order| order.is_gt() || max_exclusive && order.is_eq())) { state.reject(path, "maximum"); }
 }
@@ -96,7 +96,7 @@ fn integral(text: &str) -> bool {
 /// - text: exact number token
 /// - path: rejected location
 /// - state: boundary-local sink
-fn check_integer(text: &str, path: &str, state: &mut State) {
+fn check_integer(text: &str, path: _Path, state: &mut State) {
     if !integral(text) { state.reject(path, "type"); }
 }
 `,
@@ -109,7 +109,7 @@ fn check_integer(text: &str, path: &str, state: &mut State) {
 /// - single: validate against binary32 rather than binary64
 /// - path: rejected location
 /// - state: boundary-local sink
-fn check_float(text: &str, single: bool, path: &str, state: &mut State) {
+fn check_float(text: &str, single: bool, path: _Path, state: &mut State) {
     let finite = if single { text.parse::<f32>().is_ok_and(f32::is_finite) } else { text.parse::<f64>().is_ok_and(f64::is_finite) };
     if !finite { state.reject(path, "type"); }
 }
@@ -122,8 +122,8 @@ fn check_float(text: &str, single: bool, path: &str, state: &mut State) {
 /// - value: candidate JSON
 /// - expected: generated exact JSON
 /// - Return: value-level literal equality
-fn literal_equal(value: &Value, expected: &Value) -> bool {
-    match (value, expected) { (Value::Number(left), Value::Number(right)) => numeric_compare(left.as_str(), right.as_str()).is_some_and(Ordering::is_eq), _ => value == expected }
+fn literal_equal(value: &_JsonNode, expected: &_JsonNode) -> bool {
+    match (value, expected) { (_JsonNode::Number(left), _JsonNode::Number(right)) => numeric_compare(left.as_str(), right.as_str()).is_some_and(Ordering::is_eq), _ => value == expected }
 }
 `,
   ),

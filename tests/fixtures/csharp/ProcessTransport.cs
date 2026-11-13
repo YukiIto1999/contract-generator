@@ -6,6 +6,7 @@ using System.Text.Json;
 using EffectSystem.Domain;
 using Sample;
 using Sample.Client;
+using TypeModeling.Domain;
 
 /// <summary>Actual separate-process JSON-lines transport</summary>
 internal sealed class ProcessTransport : IIpcTransport
@@ -21,9 +22,11 @@ internal sealed class ProcessTransport : IIpcTransport
     /// <param name="command">Generated command name</param>
     /// <param name="parameters">Generated JSON parameters object</param>
     /// <param name="deadline">Forwarded host deadline</param>
+    /// <param name="token">Runtime-owned cancellation notification</param>
     /// <returns>Resolved generated envelope or communication failure</returns>
-    public Effect<NoRequirements, CommunicationFailure, string> Invoke(string command, string parameters, DateTimeOffset? deadline) =>
-        new EffectContext<NoRequirements, CommunicationFailure>().Try(async (_, token) =>
+    public async ValueTask<Result<string, CommunicationFailure>> Invoke(string command, string parameters, Deadline deadline, CancellationToken token)
+    {
+        try
         {
             token.ThrowIfCancellationRequested();
             var start = new ProcessStartInfo("dotnet") { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
@@ -39,7 +42,7 @@ internal sealed class ProcessTransport : IIpcTransport
                 using (var writer = new Utf8JsonWriter(stream))
                 {
                     writer.WriteStartObject(); writer.WriteString("command", command); writer.WriteString("parameters", parameters);
-                    if (deadline is DateTimeOffset at) writer.WriteString("deadline", at);
+                    writer.WriteString("deadline", deadline.At);
                     writer.WriteEndObject();
                 }
                 await child.StandardInput.WriteLineAsync(Encoding.UTF8.GetString(stream.ToArray()).AsMemory(), token);
@@ -49,7 +52,7 @@ internal sealed class ProcessTransport : IIpcTransport
                 string line = output[..^1];
                 if (line.EndsWith('\r')) line = line[..^1];
                 if (line.Contains('\n')) throw new IOException("IPC peer wrote more than one response line");
-                return line;
+                return Result.Succeeded(line);
             }
             finally
             {
@@ -57,7 +60,12 @@ internal sealed class ProcessTransport : IIpcTransport
                 await child.WaitForExitAsync(CancellationToken.None);
                 if (diagnostics is not null) await diagnostics;
             }
-        }, exception => exception is IOException or Win32Exception ? new CommunicationFailure("ipc-communication") : throw exception);
+        }
+        catch (Exception exception) when (exception is IOException or Win32Exception)
+        {
+            return Result.Failed(new CommunicationFailure("ipc-communication"));
+        }
+    }
 }
 
 /// <summary>Caller-owned concrete generated client requirements</summary>

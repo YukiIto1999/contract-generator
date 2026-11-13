@@ -1,6 +1,7 @@
 /** Imports, nominal brands, public value shapes and reader vocabulary shared by every generated declaration */
 export const runtimeTypesSource = String.raw`import { Ok, Err, Result } from "ts-results-es";
-import { parse, stringify, LosslessNumber, isLosslessNumber, compareLosslessNumber } from "lossless-json";
+import { LosslessNumber, isLosslessNumber, compareLosslessNumber } from "lossless-json";
+import { Tokenizer, TokenParser, TokenType, TokenizerError, TokenParserError } from "@streamparser/json";
 import { base64, base64url } from "@scure/base";
 
 /** Nominal contract role identity */
@@ -34,6 +35,14 @@ export interface Accepted<T> {
   /** Completed immutable value */
   readonly value: T;
   /** Unknown property observations without their values */
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+/** Complete boundary rejection without rejected values */
+export interface BoundaryRejection {
+  /** Applicable known-member violations */
+  readonly violations: readonly Violation[];
+  /** Unknown member observations independent of validation success */
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -98,23 +107,23 @@ export interface Codec<T> {
   /**
    * Local acceptance without defaults
    * @param input - Untrusted local candidate
-   * @returns Accepted immutable value or applicable violations with same-value pattern checks skipped after cheap failures
+   * @returns Accepted immutable value or boundary rejection; same-value pattern checks may be skipped after cheap failures
    */
-  create(input: unknown): Result<Accepted<T>, readonly Violation[]>;
+  create(input: unknown): Result<Accepted<T>, BoundaryRejection>;
   /**
    * Exact JSON decoding without defaults
    * @param text - Complete JSON document
    * @param binding - Wire interpretation
-   * @returns Accepted immutable value or violations
+   * @returns Accepted immutable value or complete boundary rejection
    */
-  decode(text: string, binding?: WireBinding): Result<Accepted<T>, readonly Violation[]>;
+  decode(text: string, binding?: WireBinding): Result<Accepted<T>, BoundaryRejection>;
   /**
    * Binding representation acceptance without defaults
    * @param input - Parsed wire candidate
    * @param binding - Wire interpretation
-   * @returns Accepted immutable value or violations
+   * @returns Accepted immutable value or complete boundary rejection
    */
-  fromWire(input: unknown, binding?: WireBinding): Result<Accepted<T>, readonly Violation[]>;
+  fromWire(input: unknown, binding?: WireBinding): Result<Accepted<T>, BoundaryRejection>;
   /**
    * Exact JSON encoding after provenance validation
    * @param value - Public value including potentially erased types
@@ -153,18 +162,36 @@ interface State {
  * @param path - JSON pointer location of the candidate
  * @param state - Current validation accumulation
  * @param mode - Candidate origin
- * @returns Entire completed value or the invalid sentinel
+ * @returns Suspended specialized acceptance frame
  */
-type Reader<T> = (value: unknown, path: string, state: State, mode: Mode) => T | undefined;
+type Reader<T> = (value: unknown, path: Path, state: State, mode: Mode) => ReadFrame<T>;
+
+/**
+ * Suspended specialized acceptance without recursive delegation
+ * @typeParam T - Completed declaration
+ */
+type ReadFrame<T> = Generator<ReadFrame<unknown>, T | undefined, unknown>;
+
+/** Deferred RFC 6901 location */
+type Path = { readonly parent: Path; readonly key: string | number } | undefined;
 
 /**
  * Specialized declaration binding representation
  * @typeParam T - Completed declaration
  * @param value - Privately completed value
  * @param binding - Binding interpretation
- * @returns Independent wire representation
+ * @returns Suspended specialized binding frame
  */
-type Writer<T> = (value: T, binding: WireBinding) => unknown;
+type Writer<T> = (value: T, binding: WireBinding) => WriteFrame;
+
+/** Specialized binding traversal without intermediate binding graphs */
+type WriteFrame = Generator<WriteFrame | WireEvent, void, unknown>;
+
+/** Binding traversal observations consumed by independent graph and text destinations */
+type WireEvent =
+  | { readonly kind: "object" | "array" | "end" }
+  | { readonly kind: "key"; readonly key: string }
+  | { readonly kind: "scalar"; readonly value: unknown };
 
 /** Binding-local scalar encodings by binding */
 type EncodingTable = Readonly<Partial<Record<WireBinding, string>>>;

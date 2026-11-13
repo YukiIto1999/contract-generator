@@ -91,7 +91,7 @@ type Mismatch = (violations: readonly C.Violation[]) => Result<never, C.Communic
  */
 function payload<T>(codec: C.Codec<T>, body: unknown, binding: C.WireBinding, mismatch: Mismatch): Result<T, C.CommunicationFailure> {
   const decoded = codec.fromWire(body, binding);
-  return decoded.isErr() ? mismatch(decoded.error) : Ok(decoded.value.value);
+  return decoded.isErr() ? mismatch(decoded.error.violations) : Ok(decoded.value.value);
 }
 `;
 

@@ -3,18 +3,55 @@ export const runtimeWire = String.raw`
 /// <summary>Standard JSON codec primitives</summary>
 internal static partial class Wire
 {
+    /// <summary>Strict Unicode conversion without replacement</summary>
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    /// <summary>JSON writer policy without a contract nesting quota</summary>
+    internal static readonly JsonWriterOptions WriterOptions = new() { MaxDepth = int.MaxValue };
+    /// <summary>Strict complete JSON text acceptance</summary>
+    /// <param name="json">Raw UTF-16 JSON text</param>
+    /// <returns>Owned validated JSON document</returns>
+    internal static JsonDocument Parse(string json)
+    {
+        if (json is null || json.Length > 0 && json[0] == '\uFEFF') throw new JsonException("Invalid JSON text");
+        byte[] bytes;
+        try { bytes = StrictUtf8.GetBytes(json); }
+        catch (EncoderFallbackException exception) { throw new JsonException("Invalid JSON Unicode", exception); }
+        JsonDocument document;
+        try { document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = int.MaxValue, AllowDuplicateProperties = false }); }
+        catch (InvalidOperationException exception) { throw new JsonException("Invalid JSON Unicode", exception); }
+        try { EscapedScalars(json); return document; }
+        catch { document.Dispose(); throw; }
+    }
+    /// <summary>Unicode scalar escape acceptance after standard JSON grammar validation</summary>
+    /// <param name="json">Grammar-validated JSON text</param>
+    private static void EscapedScalars(string json)
+    {
+        for (int i = 0; i < json.Length; i++)
+        {
+            if (json[i] != '\\') continue;
+            if (json[++i] != 'u') continue;
+            int scalar = int.Parse(json.AsSpan(i + 1, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            i += 4;
+            if (scalar is >= 0xDC00 and <= 0xDFFF) throw new JsonException("Unpaired low surrogate escape");
+            if (scalar is < 0xD800 or > 0xDBFF) continue;
+            if (i + 6 >= json.Length || json[i + 1] != '\\' || json[i + 2] != 'u') throw new JsonException("Unpaired high surrogate escape");
+            int low = int.Parse(json.AsSpan(i + 3, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            if (low is < 0xDC00 or > 0xDFFF) throw new JsonException("Unpaired high surrogate escape");
+            i += 6;
+        }
+    }
     /// <summary>RFC 6901 pointer extension</summary>
     /// <param name="path">Parent pointer</param>
     /// <param name="key">Unescaped segment</param>
     /// <returns>Extended pointer</returns>
-    internal static string At(string path, string key) => path + "/" + key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+    internal static Wire.Path At(Wire.Path path, string key) => path.Append(key);
     /// <summary>Nonthrowing string extraction because unpaired surrogate escapes are invalid text rather than defects</summary>
     /// <param name="element">JSON string element</param>
     /// <param name="c">Violation accumulator of the current boundary</param>
     /// <param name="path">Pointer of the string</param>
     /// <param name="value">Decoded UTF-16 text</param>
     /// <returns>Whether the text is valid</returns>
-    internal static bool TryString(JsonElement element, ReadContext c, string path, out string value)
+    internal static bool TryString(JsonElement element, ReadContext c, Wire.Path path, out string value)
     {
         try { value = element.GetString()!; return true; }
         catch (InvalidOperationException) { value = ""; c.Add(path, "format"); return false; }
@@ -25,7 +62,7 @@ internal static partial class Wire
     /// <param name="path">Pointer of the containing object</param>
     /// <param name="name">Decoded UTF-16 member name</param>
     /// <returns>Whether the name is valid</returns>
-    internal static bool TryName(JsonProperty property, ReadContext c, string path, out string name)
+    internal static bool TryName(JsonProperty property, ReadContext c, Wire.Path path, out string name)
     {
         try { name = property.Name; return true; }
         catch (InvalidOperationException) { name = ""; c.Add(path, "format"); return false; }
@@ -36,7 +73,7 @@ internal static partial class Wire
     /// <param name="read">Generated reader</param>
     /// <param name="binding">Binding name, http or ipc</param>
     /// <returns>Atomic decoded result</returns>
-    internal static Result<Accepted<T>, ContractFailure> Decode<T>(string json, Func<JsonElement, ReadContext, string, string, string?, T> read, string binding) => Decode(json, read, binding, new ReadContext());
+    internal static Result<Accepted<T>, ContractFailure> Decode<T>(string json, Func<JsonElement, ReadContext, Wire.Path, string, string?, T> read, string binding) => Decode(json, read, binding, new ReadContext());
     /// <summary>Standard-parser boundary continuing an accumulator that already holds observations</summary>
     /// <typeparam name="T">Contract representation</typeparam>
     /// <param name="json">Complete JSON text</param>
@@ -44,15 +81,14 @@ internal static partial class Wire
     /// <param name="binding">Binding name, http or ipc</param>
     /// <param name="c">Accumulator that carries earlier observations into the result</param>
     /// <returns>Atomic decoded result</returns>
-    internal static Result<Accepted<T>, ContractFailure> Decode<T>(string json, Func<JsonElement, ReadContext, string, string, string?, T> read, string binding, ReadContext c)
+    internal static Result<Accepted<T>, ContractFailure> Decode<T>(string json, Func<JsonElement, ReadContext, Wire.Path, string, string?, T> read, string binding, ReadContext c)
     {
         try
         {
-            var element = JsonSerializer.Deserialize(json, ContractJsonContext.Default.JsonElement);
-            return c.Finish(read(element, c, "", binding, null));
+            using var document = Parse(json);
+            return c.Finish(read(document.RootElement, c, "", binding, null));
         }
         catch (JsonException) { c.Add("", "json"); return c.Finish(default(T)!); }
-        catch (ArgumentException exception) when (exception is ArgumentNullException || exception.InnerException is EncoderFallbackException) { c.Add("", "json"); return c.Finish(default(T)!); }
     }
     /// <summary>Standard JSON output boundary</summary>
     /// <typeparam name="T">Contract representation</typeparam>
@@ -63,7 +99,7 @@ internal static partial class Wire
     internal static string Encode<T>(T value, Action<Utf8JsonWriter, T, string, string?> write, string binding)
     {
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream)) write(writer, value, binding, null);
+        using (var writer = new Utf8JsonWriter(stream, WriterOptions)) write(writer, value, binding, null);
         return Encoding.UTF8.GetString(stream.GetBuffer(), 0, checked((int)stream.Length));
     }
     /// <summary>Unicode scalar sequence validation</summary>
@@ -73,7 +109,7 @@ internal static partial class Wire
     /// <param name="uuid">Whether the text must spell a UUID</param>
     /// <param name="c">Violation accumulator of the current boundary</param>
     /// <param name="path">Pointer of the text</param>
-    internal static void Text(string? value, int? minimum, int? maximum, bool uuid, ReadContext c, string path)
+    internal static void Text(string? value, int? minimum, int? maximum, bool uuid, ReadContext c, Wire.Path path)
     {
         if (value is null) { c.Add(path, "null"); return; }
         int count = 0;
@@ -95,7 +131,7 @@ internal static partial class Wire
     /// <param name="maxExclusive">Whether the upper boundary itself is excluded</param>
     /// <param name="c">Violation accumulator of the current boundary</param>
     /// <param name="path">Pointer of the number</param>
-    internal static void Range(string text, string? minimum, bool minExclusive, string? maximum, bool maxExclusive, ReadContext c, string path)
+    internal static void Range(string text, string? minimum, bool minExclusive, string? maximum, bool maxExclusive, ReadContext c, Wire.Path path)
     {
         if (minimum is not null) { int n = Compare(text, minimum); if (n < 0 || n == 0 && minExclusive) c.Add(path, "minimum"); }
         if (maximum is not null) { int n = Compare(text, maximum); if (n > 0 || n == 0 && maxExclusive) c.Add(path, "maximum"); }
@@ -106,7 +142,8 @@ internal static partial class Wire
     internal static string Quote(string text)
     {
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream)) writer.WriteStringValue(text);
+        StrictUtf8.GetByteCount(text);
+        using (var writer = new Utf8JsonWriter(stream, WriterOptions)) writer.WriteStringValue(text);
         return Encoding.UTF8.GetString(stream.GetBuffer(), 0, checked((int)stream.Length));
     }
     /// <summary>Object formed from mapped parameters and the members of a request body object</summary>
@@ -119,7 +156,7 @@ internal static partial class Wire
     {
         try
         {
-            using var document = JsonDocument.Parse(body.Length == 0 ? "{}" : body);
+            using var document = Parse(body.Length == 0 ? "{}" : body);
             if (document.RootElement.ValueKind != JsonValueKind.Object) { c.Add("", "type"); return null; }
             var members = new List<string>();
             if (mapped.Length > 2) members.Add(mapped[1..^1]);
@@ -144,7 +181,7 @@ internal static partial class Wire
         if (body is null) return mapped;
         try
         {
-            using var document = JsonDocument.Parse(body);
+            using var document = Parse(body);
             string own = mapped.Length > 2 ? "," + mapped[1..^1] : "";
             return "{" + Quote(member) + ":" + document.RootElement.GetRawText() + own + "}";
         }

@@ -24,8 +24,6 @@ const reservedNames = new Set([
   "Vec",
   "Option",
   "Result",
-  "Value",
-  "Map",
   "Number",
   "BigInt",
   "Ordering",

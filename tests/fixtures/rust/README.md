@@ -38,6 +38,8 @@ General native acceptance requires that version or a newer compatible compiler.
 The minimum-version proof is this same collection run once with `RUST_CONTRACT_EXACT_MINIMUM=1`, under which `native.ts` fails every suite unless rustc and Cargo are exactly 1.94.0; no separate suite repeats the builds.
 Evidence from a newer compiler is never evidence for the minimum.
 
+Each native consumer crate root receives the same model-derived `rustRecursionLimit(model)` allowance as the generated crates: codec and driver binaries, compile-only probes, and standalone construction, lifecycle, topology and transport lifecycle test crates. The source-data codec uses the same helper; the Tauri host copies the derived attribute from its CLI-generated types crate. The materializers prepend the attribute without changing existing inner documentation or adding it to modules. Rust's [`recursion_limit`](https://doc.rust-lang.org/reference/attributes/limits.html#the-recursion_limit-attribute) is crate-local and governs compile-time work, including [E0320 drop-check overflow](https://doc.rust-lang.org/error_codes/E0320.html); it is not a runtime JSON-depth limit. The 256-level acyclic schema and 20,000-level runtime fixtures remain unchanged.
+
 ## Lints
 
 The generated workspace defines the lints of the Rust standard (`warnings`, `unsafe_code`, `missing_docs` and clippy `unwrap_used`, `expect_used` and the documentation lints as errors) and every generated crate inherits them. The devenv shell provides clippy, and the suite runs `cargo clippy` over every generated workspace.

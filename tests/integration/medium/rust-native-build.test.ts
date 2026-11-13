@@ -162,6 +162,7 @@ function constructionResults(): Map<string, string> {
 for (const name of [
   "construction_counts_unicode_code_points",
   "owned_children_move_without_redecode_or_clone",
+  "shared_extraction_cannot_mutate_an_existing_value",
   "construction_distinguishes_every_presence_state_on_the_wire",
   "construction_rejects_a_discriminator_that_names_another_variant",
   "exact_decimal_construction_keeps_its_lexical_spelling",
@@ -171,6 +172,31 @@ for (const name of [
   native(`passes the public constructor regression ${name}`, () => {
     expect(constructionResults().get(name)).toBe("ok");
   });
+
+native("passes the native deep JSON lifecycle and real transport envelope regressions", () => {
+  const entry = built.find((candidate) => candidate.prefix === "guarantees");
+  expect(entry).toBeDefined();
+  if (entry === undefined) throw new Error("the guarantees fixture has not been built");
+  for (const [manifest, target, count] of [
+    ["rust/fixture-codec/Cargo.toml", "lifecycle", 9],
+    ["rust/fixture-codec/Cargo.toml", "topology", 2],
+    ["rust/fixture-driver/Cargo.toml", "transport_lifecycle", 2],
+  ] as const) {
+    const run = cargo(
+      entry,
+      ["test", "--offline", "--manifest-path", manifest, "--test", target],
+      false,
+    );
+    expect({
+      target,
+      status: run.status,
+      stdout: run.status === 0 ? "" : run.stdout,
+      stderr: run.status === 0 ? "" : run.stderr,
+    }).toEqual({ target, status: 0, stdout: "", stderr: "" });
+    expect(run.stderr).not.toContain("warning");
+    expect([...run.stdout.matchAll(/^test (\S+) \.\.\. ok$/gm)]).toHaveLength(count);
+  }
+});
 
 /** Compiler errors of a probe that must fail to build
  * @param binary - Probe binary

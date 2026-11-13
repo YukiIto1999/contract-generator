@@ -130,7 +130,7 @@ export function writerShape(type: ContractType, bindingTypes: ReadonlySet<string
 function readerParameters(shape: ReaderShape): readonly Parameter[] {
   const common: readonly Parameter[] = [
     { name: "value", type: "unknown", meaning: "Untrusted candidate" },
-    { name: "path", type: "string", meaning: "JSON pointer location of the candidate" },
+    { name: "path", type: "Path", meaning: "Deferred JSON pointer location of the candidate" },
     { name: "state", type: "State", meaning: "Current validation accumulation" },
   ];
   const mode: Parameter = { name: "mode", type: "Mode", meaning: "Candidate origin" };
@@ -225,11 +225,11 @@ export function readerFunction(
 ): string {
   return functionDeclaration(
     summary,
-    name,
+    `*${name}`,
     readerParameters(shape),
-    `${typeName} | undefined`,
+    `ReadFrame<${typeName}>`,
     body,
-    { returns: "Entire completed value or the invalid sentinel" },
+    { returns: "Suspended specialized acceptance frame" },
   );
 }
 
@@ -240,6 +240,7 @@ export function readerFunction(
  * @param shape - Writer signature
  * @param body - Statements of the writer
  * @param throws - Whether the writer throws a contract defect for foreign provenance
+ * @param streaming - Whether the body emits specialized traversal events
  * @returns Documented function declaration
  */
 export function writerFunction(
@@ -248,15 +249,16 @@ export function writerFunction(
   shape: WriterShape,
   body: SourcePart,
   throws = false,
+  streaming = false,
 ): string {
   return functionDeclaration(
-    `Specialized ${typeName} wire representation`,
-    name,
+    `Specialized ${typeName} binding traversal`,
+    `*${name}`,
     writerParameters(typeName, shape),
-    "unknown",
-    body,
+    "WriteFrame",
+    streaming ? body : ['yield { kind: "scalar", value: (() => {', indent(lines(body)), "})() };"],
     {
-      returns: "Independent wire representation",
+      returns: "Suspended specialized binding frame",
       ...(throws
         ? { throws: ["ContractDefect", "Value without declaration provenance"] as const }
         : {}),

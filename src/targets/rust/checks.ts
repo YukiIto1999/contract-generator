@@ -156,7 +156,7 @@ export function checks(
   const lines = [...lengthChecks(type, constraints, value, path)];
   if (constraints.minItems !== undefined || constraints.maxItems !== undefined)
     lines.push(
-      `check_items((${value})${type.kind === "array" ? ".0" : ""}.len(), ${optional(constraints.minItems)}, ${optional(constraints.maxItems)}, ${path}, state);`,
+      `check_items((${value})${type.kind === "array" ? ".as_slice()" : ""}.len(), ${optional(constraints.minItems)}, ${optional(constraints.maxItems)}, ${path}, state);`,
     );
   lines.push(
     ...rangeChecks(type, constraints, value, path),
@@ -254,7 +254,9 @@ export function completeUse(ctx: RustContext, use: TypeUse, source: string, path
   if (body === "") return "";
   return use.nullable
     ? `if let Some(value) = ${source} { ${body} }`
-    : `{ let value = ${source}; ${body} }`;
+    : source === "value"
+      ? body
+      : `{ let value = ${source}; ${body} }`;
 }
 
 /** Violation scope asserting that a value carries none

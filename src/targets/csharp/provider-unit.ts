@@ -19,10 +19,10 @@ function handlerInterface(c: CSharpContext): string {
       lines(
         doc(
           operation.description || `Accepted ${operation.name} dispatch to a handwritten adapter`,
-          ["input", "deadline"],
+          ["input"],
           "Typed success or declared rejection",
         ),
-        `Effect<NoRequirements, ${opName(operation, "Rejection")}, ${opName(operation, "Success")}> ${name(pascal(operation.name))}(${acceptedType(c, operation)} input, DateTimeOffset? deadline);`,
+        `Effect<NoRequirements, ${opName(operation, "Rejection")}, ${opName(operation, "Success")}> ${name(pascal(operation.name))}(${acceptedType(c, operation)} input);`,
       ),
     ),
     "}",
@@ -36,7 +36,7 @@ function handlerInterface(c: CSharpContext): string {
 function providerFailure(c: CSharpContext): string {
   return lines(
     doc("Typed provider dispatch failures that the host answers itself"),
-    "[ClosedUnion] public abstract record ProviderFailure {",
+    "[Closed] public abstract record ProviderFailure {",
     doc("Closed provider failure completion"),
     "private ProviderFailure() { }",
     doc("Route or command that no operation declares"),
@@ -61,15 +61,15 @@ function dispatchIpc(c: CSharpContext): string {
   return lines(
     doc(
       "Injected IPC command dispatch",
-      ["command", "parameters", "deadline"],
+      ["command", "parameters"],
       "Resolved response envelope or typed failure that the host answers",
     ),
-    "public static Effect<IContractHandlers, ProviderFailure, string> DispatchIpc(string command, string parameters, DateTimeOffset? deadline) {",
+    "public static Effect<IContractHandlers, ProviderFailure, string> DispatchIpc(string command, string parameters) {",
     ...c.model.operations
       .filter((operation) => operation.ipc)
       .map(
         (operation) =>
-          `if (command == ${quote(operation.ipc!.command)}) return ${name(pascal(operation.name) + "Ipc")}(parameters, deadline).MapFailure(f => (ProviderFailure)new ProviderFailure.${name(pascal(operation.name))}(f));`,
+          `if (command == ${quote(operation.ipc!.command)}) return ${name(pascal(operation.name) + "Ipc")}(parameters).MapFailure(f => (ProviderFailure)new ProviderFailure.${name(pascal(operation.name))}(f));`,
       ),
     "return new EffectContext<IContractHandlers, ProviderFailure>().Fail<string>(new ProviderFailure.UnknownOperation());",
     "}",
@@ -84,15 +84,15 @@ function dispatchHttp(c: CSharpContext): string {
   return lines(
     doc(
       "Native HTTP route dispatch",
-      ["request", "deadline"],
+      ["request"],
       "Native response or typed failure that the host answers",
     ),
-    "public static Effect<IContractHandlers, ProviderFailure, HttpResponseMessage> DispatchHttp(HttpRequestMessage request, DateTimeOffset? deadline) {",
+    "public static Effect<IContractHandlers, ProviderFailure, HttpResponseMessage> DispatchHttp(HttpRequestMessage request) {",
     ...c.model.operations
       .filter((operation) => operation.http)
       .map(
         (operation) =>
-          `if (request.Method.Method == ${quote(operation.http!.method)} && request.RequestUri is not null && HttpWire.Route(${quote(operation.http!.path)}, request.RequestUri.AbsolutePath, out _)) return ${name(pascal(operation.name) + "Http")}(request, deadline).MapFailure(f => (ProviderFailure)new ProviderFailure.${name(pascal(operation.name))}(f));`,
+          `if (request.Method.Method == ${quote(operation.http!.method)} && request.RequestUri is not null && HttpWire.Route(${quote(operation.http!.path)}, request.RequestUri.AbsolutePath, out _)) return ${name(pascal(operation.name) + "Http")}(request).MapFailure(f => (ProviderFailure)new ProviderFailure.${name(pascal(operation.name))}(f));`,
       ),
     "return new EffectContext<IContractHandlers, ProviderFailure>().Fail<HttpResponseMessage>(new ProviderFailure.UnknownOperation());",
     "}",

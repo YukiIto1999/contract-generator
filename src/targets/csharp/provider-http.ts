@@ -20,18 +20,18 @@ export function renderHttpProvider(c: CSharpContext, operation: Operation): stri
   return lines(
     doc(
       "Native HTTP acceptance and handler response dispatch",
-      ["request", "deadline"],
+      ["request"],
       "Native response or positioned input rejection",
       {
         throws: [["InvalidOperationException", "A handler result that breaks the contract"]],
       },
     ),
-    `public static Effect<IContractHandlers, ${failure}, HttpResponseMessage> ${name(pascal(operation.name) + "Http")}(HttpRequestMessage request, DateTimeOffset? deadline) {`,
+    `public static Effect<IContractHandlers, ${failure}, HttpResponseMessage> ${name(pascal(operation.name) + "Http")}(HttpRequestMessage request) {`,
     `var fx = new EffectContext<IContractHandlers, ${failure}>();`,
-    `return fx.Try<${accepted}>(async (_, cancellationToken) => {`,
+    `return fx.Try<${accepted}>(async (_, deadline, cancellationToken) => {`,
     acceptRequest(c, operation),
     `}, exception => exception is HttpRequestException or IOException ? new ${failure}.Communication(new("request-communication")) : throw exception)`,
-    `.Bind(decoded => decoded is ${accepted}.Succeeded accepted ? ${direct}(accepted.Value.Value, deadline) : fx.Fail<${opName(operation, "Success")}>(new ${failure}.InvalidInput(((${accepted}.Failed)decoded).Failure)))`,
+    `.Bind(decoded => decoded.IsFailed(out var failed, out var accepted) ? fx.Fail<${opName(operation, "Success")}>(new ${failure}.InvalidInput(failed.Failure)) : ${direct}(accepted.Value))`,
     `.Map(outcome => ${outcomeSwitch(operation, false, "outcome", "Http")})`,
     ".Recover(failure => failure switch {",
     `${failure}.InvalidInput invalid => fx.Fail<HttpResponseMessage>(invalid),`,

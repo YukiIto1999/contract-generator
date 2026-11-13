@@ -19,25 +19,19 @@ function contentType(mediaType: string): string {
 }
 
 /** Placement of one parameter that travels outside the body
- * @param input - Operation input object
+ * @param index - Operation-specific projection position
  * @param parameter - Placement
  * @param refusal - Return statement that reports a parameter text without an HTTP wire form
  * @returns Statements that place the parameter text
  */
-function parameterStatement(input: ObjectType, parameter: HttpParameter, refusal: string): string {
-  const field = input.fields.find((candidate) => candidate.name === parameter.parameter)!;
-  const variable = `p${pascal(field.name)}`;
+function parameterStatement(parameter: HttpParameter, index: number, refusal: string): string {
+  const text = `text${index}`;
   const place = {
-    path: `if (!HttpWire.PathSegment(text, out var segment)) ${refusal} path = path.Replace(${quote("{" + parameter.wireName + "}")}, segment, StringComparison.Ordinal);`,
-    query: `query.Add(${quote(parameter.wireName + "=")} + Uri.EscapeDataString(text));`,
-    header: `if (!HttpWire.HeaderText(text)) ${refusal} if (!request.Headers.TryAddWithoutValidation(${quote(parameter.wireName)}, text)) throw new InvalidOperationException("Invalid request header mapping");`,
+    path: `if (!HttpWire.PathSegment(${text}, out var segment${index})) ${refusal} path = path.Replace(${quote("{" + parameter.wireName + "}")}, segment${index}, StringComparison.Ordinal);`,
+    query: `query.Add(${quote(parameter.wireName + "=")} + Uri.EscapeDataString(${text}));`,
+    header: `if (!HttpWire.HeaderText(${text})) ${refusal} if (!request.Headers.TryAddWithoutValidation(${quote(parameter.wireName)}, ${text})) throw new InvalidOperationException("Invalid request header mapping");`,
   }[parameter.location];
-  return lines(
-    `if (inputDocument.RootElement.TryGetProperty(${quote(field.wireName)}, out var ${variable})) {`,
-    `string text = HttpWire.Scalar(${variable}.GetRawText());`,
-    place,
-    "}",
-  );
+  return lines(`if (projection.Parameter${index} is string ${text}) {`, place, "}");
 }
 
 /** Body of a request whose single parameter is raw bytes
@@ -54,7 +48,7 @@ function binaryContent(c: CSharpContext, operation: Operation, input: ObjectType
   const bytes = node.kind === "scalar" && node.role !== null ? `${value}.Value` : value;
   return lines(
     field.optional && `if (${property}.IsPresent) {`,
-    `if (${c.codec(field.type.id)}.Validate(${value}) is Result<Accepted<${c.type(field.type.id)}>, ContractFailure>.Failed) throw new InvalidOperationException("Invalid byte body before wire output");`,
+    `if (${c.codec(field.type.id)}.Validate(${value}).IsFailed(out _, out _)) throw new InvalidOperationException("Invalid byte body before wire output");`,
     `request.Content = new ReadOnlyMemoryContent(${bytes}.AsMemory());`,
     contentType(operation.http!.requestMediaType),
     field.optional && "}",
@@ -76,30 +70,14 @@ function requestBody(c: CSharpContext, operation: Operation, shape: RequestShape
       return "";
     case "binary":
       return binaryContent(c, operation, input);
-    case "member": {
-      const member = input.fields.find(
-        (f) => http.body.kind === "parameter" && f.name === http.body.parameter,
-      )!;
+    case "member":
+    case "parameters":
       return lines(
-        `if (inputDocument.RootElement.TryGetProperty(${quote(member.wireName)}, out var body)) {`,
-        "request.Content = new StringContent(body.GetRawText(), Encoding.UTF8);",
+        "if (projection.Body is string body) {",
+        "request.Content = new StringContent(body, Encoding.UTF8);",
         contentType(mediaType),
         "}",
       );
-    }
-    case "parameters": {
-      const placed = new Set(http.parameters.map((parameter) => parameter.parameter));
-      const names = input.fields
-        .filter((f) => !placed.has(f.name))
-        .map((f) => `p.Name == ${quote(f.wireName)}`);
-      return lines(
-        "using (var stream = new MemoryStream()) {",
-        `using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); foreach (var p in inputDocument.RootElement.EnumerateObject()) { if (${names.join(" || ") || "false"}) p.WriteTo(writer); } writer.WriteEndObject(); }`,
-        "request.Content = new ByteArrayContent(stream.ToArray());",
-        contentType(mediaType),
-        "}",
-      );
-    }
   }
 }
 
@@ -161,8 +139,7 @@ function resultBlocks(c: CSharpContext, operation: Operation): string {
  */
 export function flatten(operation: Operation): string {
   const success = opName(operation, "Success");
-  const result = `Result<${success}, ${opName(operation, "Failure")}>`;
-  return `.Bind(result => result is ${result}.Succeeded succeeded ? fx.Succeed(succeeded.Value) : fx.Fail<${success}>(((${result}.Failed)result).Failure))`;
+  return `.Bind(result => result.IsFailed(out var failed, out var succeeded) ? fx.Fail<${success}>(failed.Failure) : fx.Succeed(succeeded))`;
 }
 
 /** Request construction before the exchange
@@ -173,18 +150,12 @@ export function flatten(operation: Operation): string {
  */
 function requestStatements(c: CSharpContext, operation: Operation, shape: RequestShape): string {
   const http = operation.http!;
-  const input = inputOf(c, operation);
-  const encoded =
-    shape === "binary"
-      ? `${opName(operation, "HttpRequestCodec")}.EncodeParameters(input)`
-      : `${c.codec(input.id)}.Encode(input, "http")`;
   const refusal = communicationReturn(operation, "request-wire-form");
   return lines(
-    requireValue("string", encoded, "inputJson"),
+    requireValue(`${opName(operation, "HttpRequestCodec")}.Project(input)`, "projection"),
     `string path = ${quote(http.path)}; var query = new List<string>();`,
     `using var request = new HttpRequestMessage(); request.Method = new HttpMethod(${quote(http.method)});`,
-    "using var inputDocument = JsonDocument.Parse(inputJson);",
-    ...http.parameters.map((parameter) => parameterStatement(input, parameter, refusal)),
+    ...http.parameters.map((parameter, index) => parameterStatement(parameter, index, refusal)),
     `var target = new Uri(requirements.ServiceOrigin, path + (query.Count == 0 ? "" : "?" + string.Join("&", query)));`,
     `if (!HttpWire.SameOrigin(requirements.ServiceOrigin, target)) ${refusal}`,
     "request.RequestUri = target;",
@@ -203,17 +174,12 @@ export function renderHttpClient(c: CSharpContext, operation: Operation): string
   const failure = opName(operation, "Failure");
   const result = `Result<${success}, ${failure}>`;
   return lines(
-    doc(
-      "Native HTTP operation effect",
-      ["input", "deadline"],
-      "Selected success or typed failure",
-      {
-        throws: [["InvalidOperationException", "A request or response that breaks the contract"]],
-      },
-    ),
-    `public static Effect<IClientRequirements, ${failure}, ${success}> ${name(pascal(operation.name) + "Http")}(${c.type(operation.input)} input, DateTimeOffset? deadline) {`,
+    doc("Native HTTP operation effect", ["input"], "Selected success or typed failure", {
+      throws: [["InvalidOperationException", "A request or response that breaks the contract"]],
+    }),
+    `public static Effect<IClientRequirements, ${failure}, ${success}> ${name(pascal(operation.name) + "Http")}(${c.type(operation.input)} input) {`,
     `var fx = new EffectContext<IClientRequirements, ${failure}>();`,
-    `return fx.Try<${result}>(async (requirements, cancellationToken) => {`,
+    `return fx.Try<${result}>(async (requirements, deadline, cancellationToken) => {`,
     requestStatements(c, operation, requestShape(c, operation)),
     "cancellationToken.ThrowIfCancellationRequested();",
     "try {",
@@ -221,7 +187,7 @@ export function renderHttpClient(c: CSharpContext, operation: Operation): string
     "int status = (int)response.StatusCode;",
     "bool gateway = status is 502 or 503 or 504;",
     resultBlocks(c, operation),
-    `if (gateway) return new ${result}.Failed(new ${failure}.Communication(new("gateway-selector-mismatch")));`,
+    `if (gateway) return Result.Failed<${failure}>(new ${failure}.Communication(new("gateway-selector-mismatch")));`,
     `throw new InvalidOperationException("Undeclared HTTP response selector");`,
     `} catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested) { throw new HttpRequestException("Unattributed native HTTP cancellation", exception); }`,
     `}, exception => exception is HttpRequestException or IOException ? new ${failure}.Communication(new("http-communication")) : throw exception)${flatten(operation)};`,

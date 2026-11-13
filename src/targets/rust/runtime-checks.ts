@@ -11,7 +11,7 @@ export const checkSupport: readonly Support[] = [
 /// - maximum: optional inclusive maximum
 /// - path: member pointer
 /// - state: boundary-local sink
-fn check_text(value: &str, minimum: Option<usize>, maximum: Option<usize>, path: &str, state: &mut State) {
+fn check_text(value: &str, minimum: Option<usize>, maximum: Option<usize>, path: _Path, state: &mut State) {
     let length = value.chars().count();
     if minimum.is_some_and(|minimum| length < minimum) { state.reject(path, "minLength"); }
     if maximum.is_some_and(|maximum| length > maximum) { state.reject(path, "maxLength"); }
@@ -27,7 +27,7 @@ fn check_text(value: &str, minimum: Option<usize>, maximum: Option<usize>, path:
 /// - maximum: optional inclusive maximum
 /// - path: member pointer
 /// - state: boundary-local sink
-fn check_items(length: usize, minimum: Option<usize>, maximum: Option<usize>, path: &str, state: &mut State) {
+fn check_items(length: usize, minimum: Option<usize>, maximum: Option<usize>, path: _Path, state: &mut State) {
     if minimum.is_some_and(|minimum| length < minimum) { state.reject(path, "minItems"); }
     if maximum.is_some_and(|maximum| length > maximum) { state.reject(path, "maxItems"); }
 }

@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@scure/base": "2.4.0",
+    "@streamparser/json": "0.0.26",
     "@types/node": "24.10.1",
     "@typespec/compiler": "1.17.0",
     "fast-check": "4.3.0",

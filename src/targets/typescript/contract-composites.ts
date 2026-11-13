@@ -29,22 +29,49 @@ import { camel, indent, lines, pascal, quote, type SourcePart } from "./source-t
  * @returns Constant source expression
  */
 function constantSource(value: Constant): string {
-  switch (value.kind) {
-    case "number":
-      return `new LosslessNumber(${quote(value.text)})`;
-    case "null":
-      return "null";
-    case "string":
-    case "boolean":
-      return quote(value.value);
-    case "array":
-      return `[${value.items.map(constantSource).join(", ")}]`;
-    case "object":
-      return `{ ${Object.entries(value.properties)
-        .sort(([left], [right]) => compareText(left, right))
-        .map(([name, child]) => `[${quote(name)}]: ${constantSource(child)}`)
-        .join(", ")} }`;
+  const pending: (Constant | string)[] = [value];
+  const chunks: string[] = [];
+  while (pending.length > 0) {
+    const next = pending.pop()!;
+    if (typeof next === "string") {
+      chunks.push(next);
+      continue;
+    }
+    switch (next.kind) {
+      case "number":
+        chunks.push(next.text);
+        break;
+      case "null":
+        chunks.push("null");
+        break;
+      case "string":
+      case "boolean":
+        chunks.push(quote(next.value));
+        break;
+      case "array":
+        chunks.push("[");
+        pending.push("]");
+        for (let index = next.items.length - 1; index >= 0; index--) {
+          pending.push(next.items[index]!);
+          if (index > 0) pending.push(",");
+        }
+        break;
+      case "object": {
+        chunks.push("{");
+        pending.push("}");
+        const members = Object.entries(next.properties).sort(([left], [right]) =>
+          compareText(left, right),
+        );
+        for (let index = members.length - 1; index >= 0; index--) {
+          const [name, child] = members[index]!;
+          pending.push(child, ":", quote(name));
+          if (index > 0) pending.push(",");
+        }
+        break;
+      }
+    }
   }
+  return `parseJson(${quote(chunks.join(""))}).unwrap()`;
 }
 
 /**
@@ -126,13 +153,13 @@ export function objectParts(context: ContractContext, type: ObjectType, declared
     `return leave(value, state, before) ? (complete(output, identity) as unknown as ${declared.name}) : undefined;`,
   ];
   const writer: SourcePart = [
-    "const output: Record<string, unknown> = Object.create(null);",
+    'yield { kind: "object" };',
     type.fields.map((field) => {
       const member = `value[${quote(field.name)}]`;
-      const assign = `output[${quote(field.wireName)}] = ${writeUse(context, field.type, member)};`;
-      return field.optional ? `if (${member} !== undefined) ${assign}` : assign;
+      const emit = `yield { kind: "key", key: ${quote(field.wireName)} }; yield ${writeUse(context, field.type, member)};`;
+      return field.optional ? `if (${member} !== undefined) { ${emit} }` : emit;
     }),
-    "return output;",
+    'yield { kind: "end" };',
   ];
   return {
     reader: readerFunction(declared.name, declared.reader, "moded", reader),
@@ -141,6 +168,8 @@ export function objectParts(context: ContractContext, type: ObjectType, declared
       declared.writer,
       writerShape(type, context.bindingTypes),
       writer,
+      false,
+      true,
     ),
   };
 }
@@ -173,7 +202,11 @@ export function arrayParts(context: ContractContext, type: ArrayType, declared: 
     "}",
     `return leave(value, state, before) ? (complete(output, identity) as unknown as ${declared.name}) : undefined;`,
   ];
-  const writer = `return value.map((element) => ${writeUse(context, type.element, "element")});`;
+  const writer = [
+    'yield { kind: "array" };',
+    `for (const element of value) yield ${writeUse(context, type.element, "element")};`,
+    'yield { kind: "end" };',
+  ];
   return {
     reader: readerFunction(declared.name, declared.reader, "moded", reader),
     writer: writerFunction(
@@ -181,6 +214,8 @@ export function arrayParts(context: ContractContext, type: ArrayType, declared: 
       declared.writer,
       writerShape(type, context.bindingTypes),
       writer,
+      false,
+      true,
     ),
   };
 }
@@ -238,7 +273,7 @@ export function unionParts(context: ContractContext, type: UnionType, declared: 
     `switch ((value as unknown as Record<string, unknown>)[${quote(local)}]) {`,
     type.variants.map(
       (variant) =>
-        `  case ${quote(variant.tag)}: return ${writeUse(context, variant.type, `value as ${referenceType(context, variant.type)}`)};`,
+        `  case ${quote(variant.tag)}: yield ${writeUse(context, variant.type, `value as ${referenceType(context, variant.type)}`)}; return;`,
     ),
     '  default: throw new ContractDefect("Invalid union provenance");',
     "}",
@@ -250,6 +285,7 @@ export function unionParts(context: ContractContext, type: UnionType, declared: 
       declared.writer,
       writerShape(type, context.bindingTypes),
       writer,
+      true,
       true,
     ),
   };

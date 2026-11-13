@@ -105,7 +105,7 @@ function declaration(c: CSharpContext, node: EnumType, cases: readonly Case[]): 
   const self = name(node.name);
   return lines(
     doc(node.description || `Closed set of exact values of several JSON kinds for ${node.name}`),
-    `[ClosedUnion] public abstract record ${self} {`,
+    `[Closed] public abstract record ${self} {`,
     doc("Closed hierarchy completion"),
     `private ${self}() { }`,
     ...cases.map((entry) => caseDeclaration(c, node, entry)),
@@ -125,7 +125,7 @@ function readMembers(cases: readonly Case[], t: string): string {
     entry === undefined ? "" : `${t}.${entry.record}.Complete(${payload})`;
   return lines(
     doc("Closed member guard", ["value", "c", "path"]),
-    `internal static void Check(${t} value, ReadContext c, string path) {`,
+    `internal static void Check(${t} value, ReadContext c, Wire.Path path) {`,
     `if (value is null) { c.Add(path, "null"); return; }`,
     ...cases.map((entry) =>
       entry.storage === undefined
@@ -139,7 +139,7 @@ function readMembers(cases: readonly Case[], t: string): string {
       ["element", "c", "path", "binding", "encoding"],
       "Candidate that the caller discards when a violation was recorded",
     ),
-    `internal static ${t} Read(JsonElement element, ReadContext c, string path, string binding, string? encoding) {`,
+    `internal static ${t} Read(JsonElement element, ReadContext c, Wire.Path path, string binding, string? encoding) {`,
     `${t} candidate;`,
     "switch (element.ValueKind) {",
     has("string") &&

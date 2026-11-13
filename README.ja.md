@@ -150,18 +150,34 @@ emitter は印を削除せず競合を報告し、復旧には所有者が残っ
 
 ## 出力
 
-| path                                                               | 内容                                                                                                           |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `typescript/contract.ts`                                           | 型、構築、codec。`ts-results-es`、`lossless-json`、`@scure/base` と、pattern がある場合だけ `re2js` に依存する |
-| `typescript/provider.ts`、`typescript/client.ts`                   | handler の Interface と dispatch、HTTP と IPC の client                                                        |
-| `csharp/types/`、`csharp/provider/`、`csharp/client/`              | 三つの project で、types の project は TypeModeling だけを参照する                                             |
-| `rust/types/`、`rust/transport/`、`rust/provider/`、`rust/client/` | 四つの crate で、types の crate は HTTP にも非同期 runtime にも依存しない                                      |
-| `schemas/`、`http/openapi.json`、`docs/reference.md`               | 参照用の投影で、完全な検証 schema でも生成の入力でもない                                                       |
+| path                                                               | 内容                                                                                                                                        |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript/contract.ts`                                           | 型、構築、codec。`ts-results-es`、`lossless-json`、`@streamparser/json` 0.0.26、`@scure/base` と、pattern がある場合だけ `re2js` に依存する |
+| `typescript/provider.ts`、`typescript/client.ts`                   | handler の Interface と dispatch、HTTP と IPC の client                                                                                     |
+| `csharp/types/`、`csharp/provider/`、`csharp/client/`              | 三つの project で、types の project は TypeModeling だけを参照する                                                                          |
+| `rust/types/`、`rust/transport/`、`rust/provider/`、`rust/client/` | 四つの crate で、types の crate は HTTP にも非同期 runtime にも依存しない                                                                   |
+| `schemas/`、`http/openapi.json`、`docs/reference.md`               | 参照用の投影で、完全な検証 schema でも生成の入力でもない                                                                                    |
 
 生成する handler の Interface は、接続のうち契約側の口である。
 手書きの adapter がそれを実装して application を呼ぶので、application は生成コードに依存しない。
 生成した提供側は、不正な入力、未知の操作、取り消しを型付きの結果として host へ返し、応答は host が決める。
 未知の項目の診断は、その項目を含む object を `path` の JSON pointer で、項目の名前を `key` で示す。
+
+TypeScript の `create`、`decode`、`fromWire`、提供側の入力受理は、失敗時に `BoundaryRejection` を返す。
+既知の項目の違反は `error.violations`、未知の項目の診断は `error.diagnostics` から読む。
+既知の項目が不正な場合も診断は残すが、未知の値はいずれの配列にも含めない。
+`encode` と `toWire` の失敗型は、引き続き違反の配列である。
+
+TypeScript の codec は、深さの上限を契約に設けず、呼出し stack に依存しない同期処理を行う。
+構築済みの不変な子は再利用し、宣言した項目をたどって祖先へ戻る循環は拒否するが、同じ子の共有は拒否しない。
+未知のローカル項目の値は読み取らない。
+`encode` は JSON を直接書き出し、`toWire` は独立して所有できる binding の値を作る。
+入力を受け入れる前の byte 数の制限と送信前の出力制限は、host が担う。
+
+JSON の wire profile は、値が等しい場合、escape を解くと名前が等しくなる場合、未知の部分にある場合も含め、object の項目名の重複を拒否する。
+文字列と UTF-8 byte 列の入口はいずれも、先頭の BOM と不正な Unicode を置換せずに拒否する。
+文字列や項目名の中の U+FEFF、ほかの正しい Unicode、数値の厳密な綴りは、正規化や binary64 の範囲制限を加えずに保つ。
+これらの規則で曖昧になる入力は、修復も正規化もせずに拒否する。
 
 ## 言語ごとの接続
 
@@ -170,6 +186,12 @@ emitter は印を削除せず競合を報告し、復旧には所有者が残っ
 生成コードは `ts-results-es` の `Result` と `AsyncResult` を返し、effect の型を自分では定義しない。
 `typescript-effect-module` で指定した module は、`(env, signal, deadlineAt) => AsyncResult<A, E>` として呼べる `Effect<Env, E, A>` と、その形の関数を受け取る `deferEffect` を export する。
 `createFetchTransport` は signal を引き渡し、timer を足さない。
+
+生成した module の実行時依存は、利用する application に直接 install する。
+
+```sh
+npm install --save-exact ts-results-es@7.1.0 lossless-json@4.3.3 @streamparser/json@0.0.26 @scure/base@2.4.0
+```
 
 pattern を含む生成 module を使う application は、自身の `package.json` に `"re2js": "2.10.0"` を直接の実行時依存として宣言する。
 生成器の推移的な依存の install に頼らない。
@@ -180,7 +202,7 @@ pattern のない module は RE2JS を import しない。
 
 ### C#
 
-生成する project は、TypeModeling と EffectSystem を、`v0.2.0` の tag の source checkout から参照する。
+生成する project は、[TypeModeling `v0.3.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.3.0) と [EffectSystem `v0.3.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.3.0) の source を参照する。
 二つの checkout は `typemodeling-dotnet/` と `effectsystem-dotnet/` の名前で隣に並べる。
 project の絶対 path は、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` として、command line の global property か環境変数で渡す。
 利用側の `.csproj` だけに置いた property は参照先へ伝わらない。
@@ -219,16 +241,36 @@ types の単位だけを使う consumer では、`EffectSystemProjectPath` を�
 どちらの import も、analyzer の assembly を実行時の依存には含めない。
 共有した import は、analyzer の project がない場合に検査を黙って省かず、エラーにする。
 閉じた型の switch は全 variant を列挙し、default・discard の arm を置かない。
-固定した analyzer は、variant の欠落と閉じた型に対する switch 文を拒否するが、利用側が switch 式に書く catchall の arm までは禁止しない。
-EffectSystem `v0.2.0` には期限の型がないので、各操作は `DateTimeOffset? deadline` を受け取ってそのまま引き渡し、timer は host が所有する。
-この期限の表現は、標準の `languages/csharp/connection.md` と `languages/csharp/coordination.md` が定める `Deadline` との接続を満たしていない。
-置換には、期限とその実行方針を所有する互換性のある EffectSystem の release が必要である。
+生成する global analyzer configuration は `TYPMOD021` を有効にし、閉じた型に対する明示的な catchall arm を拒否する。
+利用側にも `Contract.Analysis.props` を通して設定が届くため、新しい variant には明示的な case の追加が必要になる。
+Effect を組み立てる method は deadline 引数を持たない。
+composition root が clock、期限の診断先、絶対期限 `Deadline`、期限超過時の failure factory を `EffectRuntime` に渡し、native effect は `Try` から同じ期限を受け取る。
+IPC transport は `Deadline` と末尾の cancellation token を受け取り、HTTP handler は `ContractClient.DeadlineOption` の `HttpRequestOptionsKey<Deadline>` から期限を読む。
+配列は `ImmutableArray<T>` を内部に持つ nominal な immutable wrapper `<ArrayName>Codec.Value` になる。
+codec の内部に型を置くため、契約の最上位名に新しい除外を設けない。
+構造体の default 値は無効であり、factory が呼び出し側の collection をコピーして要素を検証する。
+object、配列、union、provider default の走査には private な作業 stack を使い、契約上の深さ制限を設けない。
+変更のない受理済みの子は同じ値を再利用する。
+object と provider の受理済み model は、再帰的な等価性や `with` による複製を持つ record ではなく、get-only property を持つ sealed class であり、等価性は参照で決まる。
+配列の値は、不変な内部 storage の同一性で比較する。
+union と outcome の record は網羅できる case を保つが、複合 payload の比較・hash・文字列化では object graph を再帰的にたどらない。
+これらを wire 上の値の同値判定には使わず、値の構築と入出力には生成した factory と codec を使う。
+JSON の受理では、未知の値の内部も含めて、重複名、先頭の BOM、不正な Unicode を拒否する。
+有効な文字と数値の意味は保持し、入力 byte 数や出力サイズの制限は host が所有する。
 
 ### Rust
 
 生成する crate は、標準の `Result` と future を使い、取り消しには `tokio-util` の `CancellationToken` を使う。
 server は host が所有し、要求ごとに `dispatch_http` か `dispatch_ipc` を呼んで、返された `ProviderFailure` を自分の応答へ対応付ける。
-IPC の text を受け取る host は、数値の綴りを保つ生成済みの `parse_json` で parse する。
+IPC host は元の UTF-8 JSON `String` をそのまま `dispatch_ipc` へ渡し、生成した envelope の text を返す。
+`IpcTransport` も同じ text の境界を使う。
+Tauri command は汎用の JSON DOM ではなく文字列を受け取り、framework による先行 parse の深さ制限や数値の正規化を避ける。
+再帰する値の構築、decode、encode、default、等価性、debug 表示、clone、解放は、値の深さに比例する呼出し stack を使わない。
+不変な複合 payload を共有し、借用や clone で子孫の graph をコピーしない。
+文字列と UTF-8 byte 列の decode は、未知の部分にある重複名も含め、前述の JSON wire profile を検査する。
+生成した Rust README は、宣言の graph から求めた `recursion_limit` を consumer の各 crate root に指定する。
+この compiler の許容量は実行時の JSON の深さとは別であり、依存先から継承されない。
+生成型を所有する独立した binary や結合 test の root にも指定する。
 manifest は architecture-standard の lint を持ち、Rust 1.94.0 以降の互換性のある compiler を要求する。
 サポートの下限は固定した native 受入環境に合わせている。
 edition の下限は、その compiler での動作を確認した値ではないため、サポートの下限にしない。
@@ -294,8 +336,8 @@ emitter の事前検査より前に、TypeSpec 1.17.0 の `@pattern` decorator �
 その違反は残し、兄弟項目と独立した field の検証は続ける。
 一つの値で失敗する全規則を列挙する保証はない。
 pattern を実行して不一致だった場合は、引き続き `format` 違反となる。
-結果の形は変えない。
-成功は受理した値と未知項目の診断、失敗は違反を持ち、部分的に受理した値を返さない。
+pattern の検証にも共通の結果型を使う。
+成功は受理した値と未知項目の診断を持ち、失敗は違反と検出済みの診断を保持して、部分的に受理した値を返さない。
 
 内部モデルと JSON Schema・OpenAPI の投影には、翻訳後の RE2JS の式ではなく元の ECMAScript source を残す。
 外部 schema validator の実行安全性はその利用側が所有し、生成 runtime の保証は引き継がれない。

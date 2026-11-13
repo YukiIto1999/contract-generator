@@ -2,7 +2,7 @@ import type { ObjectType, Operation } from "../../model/contract-model.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { lines, name, pascal } from "./naming.js";
-import { applyMethod } from "./provider-defaults.js";
+import { applyMethod } from "./provider-default-plan.js";
 
 /** Operation input object
  * @param c - Target context

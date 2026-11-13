@@ -21,17 +21,17 @@
     "effectsystem-dotnet": {
       "flake": false,
       "locked": {
-        "lastModified": 1787678595,
-        "narHash": "sha256-yqfEQtHikVKFoLe5aCe6Bdqhh4ZYGWPnBHLqV2CDHmw=",
+        "lastModified": 1794636436,
+        "narHash": "sha256-D4q5oVLlliX/t307Rw38ge/syG1CrWgkr/Czkz8G3V0=",
         "owner": "YukiIto1999",
         "repo": "effectsystem-dotnet",
-        "rev": "8d07a0e06a16a402d550af8571ed1f025a7df5f5",
+        "rev": "3eee917384d87caed78fc91b786437ec6125eff9",
         "type": "github"
       },
       "original": {
         "owner": "YukiIto1999",
         "repo": "effectsystem-dotnet",
-        "rev": "8d07a0e06a16a402d550af8571ed1f025a7df5f5",
+        "rev": "3eee917384d87caed78fc91b786437ec6125eff9",
         "type": "github"
       }
     },
@@ -62,17 +62,17 @@
     "typemodeling-dotnet": {
       "flake": false,
       "locked": {
-        "lastModified": 1791811805,
-        "narHash": "sha256-wNMcOi4xUA2mzUwspVUXpx/N53H0oDf+L8zRh43z5AY=",
+        "lastModified": 1794635433,
+        "narHash": "sha256-1hcjBOZ/M65HrqUl4/sGbUj6oyWepmIgldRT6o78WIc=",
         "owner": "YukiIto1999",
         "repo": "typemodeling-dotnet",
-        "rev": "98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33",
+        "rev": "fd70476a34060015d0756f92d746e6b762f491ae",
         "type": "github"
       },
       "original": {
         "owner": "YukiIto1999",
         "repo": "typemodeling-dotnet",
-        "rev": "98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33",
+        "rev": "fd70476a34060015d0756f92d746e6b762f491ae",
         "type": "github"
       }
     }

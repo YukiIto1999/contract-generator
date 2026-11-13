@@ -451,7 +451,7 @@ function operationChecks(
  * @param result - Generated public acceptance
  * @returns Accepted value
  */
-function accepted<T>(result: Result<C.Accepted<T>, readonly C.Violation[]>): T {
+function accepted<T>(result: Result<C.Accepted<T>, C.BoundaryRejection>): T {
   if (result.isErr()) throw new Error(JSON.stringify(result.error));
   return result.value.value;
 }

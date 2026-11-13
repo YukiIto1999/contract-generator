@@ -75,13 +75,13 @@ export function renderClosed(c: CSharpContext, node: LiteralType | EnumType): st
   const values = node.kind === "literal" ? [node.value] : node.members.map((m) => m.value);
   const members = lines(
     doc("Closed literal guard", ["value", "c", "path"]),
-    `internal static void Check(${t} value, ReadContext c, string path) { if (!(${values.map(matches).join(" || ")})) c.Add(path, "literal"); }`,
+    `internal static void Check(${t} value, ReadContext c, Wire.Path path) { if (!(${values.map(matches).join(" || ")})) c.Add(path, "literal"); }`,
     doc(
       "Closed literal JSON acceptance",
       ["element", "c", "path", "binding", "encoding"],
       "Literal candidate that the caller discards when a violation was recorded",
     ),
-    `internal static ${t} Read(JsonElement element, ReadContext c, string path, string binding, string? encoding) {`,
+    `internal static ${t} Read(JsonElement element, ReadContext c, Wire.Path path, string binding, string? encoding) {`,
     readValue(values),
     "Check(value, c, path); return value;",
     "}",

@@ -46,6 +46,7 @@ function textParts(
 ): Parts {
   const reader: SourcePart = [
     'if (typeof value !== "string") return invalid(state, path, "type");',
+    'if (!jsonUnicodeScalarString(value)) return invalid(state, path, "format");',
     temporalKind !== undefined &&
       `if (!temporal(value, ${quote(temporalKind)})) return invalid(state, path, "format");`,
     textChecks(context, type.name, type.constraints, { text: "value", items: "value" }),

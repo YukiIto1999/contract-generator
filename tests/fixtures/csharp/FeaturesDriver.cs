@@ -73,7 +73,9 @@ internal static class FeaturesDriver
     private static async Task RawIpcProvider(JsonElement request, Utf8JsonWriter writer)
     {
         var handlers = new FeatureHandlers("first");
-        var exit = await new EffectRuntime<IContractHandlers>(handlers).Run(ContractProvider.DispatchIpc(request.GetProperty("command").GetString()!, request.GetProperty("parameters").GetString()!, null), CancellationToken.None);
+        var clock = TimeProvider.System;
+        var diagnostics = new FeatureDeadlineDiagnostics();
+        var exit = await new EffectRuntime<IContractHandlers>(handlers, clock, diagnostics).Run(ContractProvider.DispatchIpc(request.GetProperty("command").GetString()!, request.GetProperty("parameters").GetString()!), Deadline.FromBudget(clock, TimeSpan.FromSeconds(30)), _ => new ProviderFailure.Choose(new ChooseFailure.Communication(new("deadline"))), CancellationToken.None);
         if (exit is EffectExit<ProviderFailure, string>.Succeeded succeeded) { writer.WriteString("exit", "responded"); writer.WriteString("envelope", succeeded.Value); }
         else if (exit is EffectExit<ProviderFailure, string>.Failed failed) writer.WriteString("exit", failed.Failure is ProviderFailure.UnknownOperation ? "unknown-operation" : "failed");
         else writer.WriteString("exit", exit is EffectExit<ProviderFailure, string>.Defected ? "defected" : "canceled");
@@ -87,7 +89,9 @@ internal static class FeaturesDriver
     {
         var handlers = new FeatureHandlers("first");
         var input = Required(DefaultsInputCodec.Decode(request.GetProperty("payload").GetString()!, "http"));
-        var exit = await new EffectRuntime<IContractHandlers>(handlers).Run(ContractProvider.Defaults(input, null), CancellationToken.None);
+        var clock = TimeProvider.System;
+        var diagnostics = new FeatureDeadlineDiagnostics();
+        var exit = await new EffectRuntime<IContractHandlers>(handlers, clock, diagnostics).Run(ContractProvider.Defaults(input), Deadline.FromBudget(clock, TimeSpan.FromSeconds(30)), _ => new DefaultsFailure.Communication(new("deadline")), CancellationToken.None);
         writer.WriteString("exit", exit is EffectExit<DefaultsFailure, DefaultsSuccess>.Succeeded ? "succeeded" : "other");
         if (handlers.Seen is not null) { writer.WritePropertyName("handlerSaw"); writer.WriteRawValue(handlers.Seen); }
     }
@@ -139,16 +143,16 @@ internal static class FeaturesDriver
     /// <param name="writer">JSON observation output</param>
     private static void Observe<T>(Result<Accepted<T>, ContractFailure> result, Func<T, Result<string, ContractFailure>> encode, Utf8JsonWriter writer)
     {
-        if (result is Result<Accepted<T>, ContractFailure>.Succeeded accepted)
+        if (!result.IsFailed(out var failed, out var accepted))
         {
-            if (encode(accepted.Value.Value) is not Result<string, ContractFailure>.Succeeded json) throw new InvalidOperationException("Accepted generated value failed output guard");
+            if (encode(accepted.Value).IsFailed(out _, out var json)) throw new InvalidOperationException("Accepted generated value failed output guard");
             writer.WriteBoolean("accepted", true);
-            writer.WriteString("encoded", json.Value);
-            Diagnostics(writer, accepted.Value.Diagnostics);
+            writer.WriteString("encoded", json);
+            Diagnostics(writer, accepted.Diagnostics);
             writer.WriteStartArray("violations"); writer.WriteEndArray();
             return;
         }
-        var rejected = ((Result<Accepted<T>, ContractFailure>.Failed)result).Failure;
+        var rejected = failed.Failure;
         writer.WriteBoolean("accepted", false);
         Diagnostics(writer, rejected.Diagnostics);
         Violations(writer, rejected);
@@ -210,15 +214,18 @@ internal static class FeaturesDriver
     {
         string operation = request.GetProperty("operation").GetString()!;
         var handlers = new FeatureHandlers(request.TryGetProperty("scenario", out var scenario) ? scenario.GetString()! : "first");
-        var loopback = new LoopbackHandler(handlers);
+        var clock = TimeProvider.System;
+        var diagnostics = new FeatureDeadlineDiagnostics();
+        var deadline = Deadline.FromBudget(clock, TimeSpan.FromSeconds(30));
+        var loopback = new LoopbackHandler(handlers, clock, diagnostics);
         bool useLoopback = !request.TryGetProperty("url", out var url);
         using var loopbackClient = new HttpClient(loopback);
         var origin = new Uri(useLoopback ? "http://loopback.invalid/" : url.GetString()!);
-        var consumer = new EffectRuntime<IClientRequirements>(new FeatureClientRequirements(useLoopback ? loopbackClient : client, origin));
+        var consumer = new EffectRuntime<IClientRequirements>(new FeatureClientRequirements(useLoopback ? loopbackClient : client, origin), clock, diagnostics);
         if (operation == "choose")
         {
             var input = Required(ChooseInput.Create());
-            WriteExit(writer, await consumer.Run(ContractClient.ChooseHttp(input, null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.ChooseHttp(input), deadline, _ => new ChooseFailure.Communication(new("deadline")), CancellationToken.None),
                 success => { _ = success switch {
                     ChooseSuccess.First first => WriteChoice(writer, "First", first.Value.Value),
                     ChooseSuccess.Second second => WriteChoice(writer, "Second", second.Value.Value),
@@ -240,33 +247,33 @@ internal static class FeaturesDriver
                 : default;
             var search = request.TryGetProperty("search", out var searchElement) ? Presence<string>.Present(searchElement.GetString()!) : default;
             var input = Required(RouteInput.Create(payload, request.GetProperty("pathId").GetString()!, search, request.GetProperty("token").GetString()!));
-            WriteExit(writer, await consumer.Run(ContractClient.RouteHttp(input, null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.RouteHttp(input), deadline, _ => new RouteFailure.Communication(new("deadline")), CancellationToken.None),
                 success => { writer.WriteString("case", "Matched"); writer.WriteString("value", ((RouteSuccess.Matched)success).Value.Value); },
                 failure => WriteFailure(writer, failure is RouteFailure.Communication communication ? communication.Failure.Reason : null, failure is RouteFailure.InvalidInput invalid ? invalid.Failure : null));
         }
         else if (operation == "upload")
         {
             var input = Required(UploadInput.Create(ImmutableArray.Create(Convert.FromBase64String(request.GetProperty("bytes").GetString()!))));
-            WriteExit(writer, await consumer.Run(ContractClient.UploadHttp(input, null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.UploadHttp(input), deadline, _ => new UploadFailure.Communication(new("deadline")), CancellationToken.None),
                 success => { writer.WriteString("case", "Stored"); writer.WriteString("value", ((UploadSuccess.Stored)success).Value.Value); },
                 failure => WriteFailure(writer, failure is UploadFailure.Communication communication ? communication.Failure.Reason : null, failure is UploadFailure.InvalidInput invalid ? invalid.Failure : null));
         }
         else if (operation == "image")
         {
-            WriteExit(writer, await consumer.Run(ContractClient.ImageHttp(Required(ImageInput.Create()), null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.ImageHttp(Required(ImageInput.Create())), deadline, _ => new ImageFailure.Communication(new("deadline")), CancellationToken.None),
                 success => { writer.WriteString("case", "Loaded"); writer.WriteString("bytes", Convert.ToBase64String(((ImageSuccess.Loaded)success).Value.AsSpan())); },
                 failure => WriteFailure(writer, failure is ImageFailure.Communication communication ? communication.Failure.Reason : null, failure is ImageFailure.InvalidInput invalid ? invalid.Failure : null));
         }
         else if (operation == "ping")
         {
-            WriteExit(writer, await consumer.Run(ContractClient.PingHttp(Required(PingInput.Create()), null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.PingHttp(Required(PingInput.Create())), deadline, _ => new PingFailure.Communication(new("deadline")), CancellationToken.None),
                 success => writer.WriteString("case", "Pong"),
                 failure => WriteFailure(writer, failure is PingFailure.Communication communication ? communication.Failure.Reason : null, failure is PingFailure.InvalidInput invalid ? invalid.Failure : null));
         }
         else if (operation == "archive")
         {
             var input = Required(ArchiveInput.Create(request.GetProperty("item").GetString()!, request.GetProperty("tenant").GetString()!, request.GetProperty("token").GetString()!));
-            WriteExit(writer, await consumer.Run(ContractClient.ArchiveHttp(input, null), CancellationToken.None),
+            WriteExit(writer, await consumer.Run(ContractClient.ArchiveHttp(input), deadline, _ => new ArchiveFailure.Communication(new("deadline")), CancellationToken.None),
                 success => { writer.WriteString("case", "Archived"); writer.WriteString("value", ((ArchiveSuccess.Archived)success).Value.Value); },
                 failure => WriteFailure(writer, failure is ArchiveFailure.Communication communication ? communication.Failure.Reason : null, failure is ArchiveFailure.InvalidInput invalid ? invalid.Failure : null));
         }
@@ -317,7 +324,9 @@ internal static class FeaturesDriver
             message.Content = new ByteArrayContent(Convert.FromBase64String(body.GetString()!));
             if (request.TryGetProperty("contentType", out var contentType)) message.Content.Headers.TryAddWithoutValidation("Content-Type", contentType.GetString());
         }
-        var exit = await new EffectRuntime<IContractHandlers>(handlers).Run(ContractProvider.DispatchHttp(message, null), CancellationToken.None);
+        var clock = TimeProvider.System;
+        var diagnostics = new FeatureDeadlineDiagnostics();
+        var exit = await new EffectRuntime<IContractHandlers>(handlers, clock, diagnostics).Run(ContractProvider.DispatchHttp(message), Deadline.FromBudget(clock, TimeSpan.FromSeconds(30)), _ => new ProviderFailure.Choose(new ChooseFailure.Communication(new("deadline"))), CancellationToken.None);
         if (exit is EffectExit<ProviderFailure, HttpResponseMessage>.Succeeded succeeded)
         {
             using var response = succeeded.Value;
@@ -337,7 +346,16 @@ internal static class FeaturesDriver
                 ProviderFailure.Defaults { Failure: DefaultsFailure.InvalidInput invalid } => invalid.Failure,
                 ProviderFailure.Merge { Failure: MergeFailure.InvalidInput invalid } => invalid.Failure,
                 ProviderFailure.Ping { Failure: PingFailure.InvalidInput invalid } => invalid.Failure,
-                _ => null,
+                ProviderFailure.Archive { Failure: ArchiveFailure.InvalidInput invalid } => invalid.Failure,
+                ProviderFailure.Route { Failure: RouteFailure.Declared or RouteFailure.Communication } => null,
+                ProviderFailure.Upload { Failure: UploadFailure.Declared or UploadFailure.Communication } => null,
+                ProviderFailure.Choose { Failure: ChooseFailure.Declared or ChooseFailure.Communication } => null,
+                ProviderFailure.Image { Failure: ImageFailure.Declared or ImageFailure.Communication } => null,
+                ProviderFailure.Defaults { Failure: DefaultsFailure.Declared or DefaultsFailure.Communication } => null,
+                ProviderFailure.Merge { Failure: MergeFailure.Declared or MergeFailure.Communication } => null,
+                ProviderFailure.Ping { Failure: PingFailure.Declared or PingFailure.Communication } => null,
+                ProviderFailure.Archive { Failure: ArchiveFailure.Declared or ArchiveFailure.Communication } => null,
+                ProviderFailure.UnknownOperation => null,
             };
             if (input is not null) { writer.WriteString("exit", "input"); Violations(writer, input); }
             else writer.WriteString("exit", failed.Failure is ProviderFailure.UnknownOperation ? "unknown-operation" : "other");
@@ -351,8 +369,8 @@ internal static class FeaturesDriver
     /// <param name="result">Actual generated factory result</param>
     /// <returns>Completed fixture value</returns>
     /// <exception cref="InvalidOperationException">Invalid fixture setup</exception>
-    internal static T Required<T>(Result<Accepted<T>, ContractFailure> result) => result is Result<Accepted<T>, ContractFailure>.Succeeded accepted
-        ? accepted.Value.Value : throw new InvalidOperationException("Invalid fixture setup");
+    internal static T Required<T>(Result<Accepted<T>, ContractFailure> result) => result.IsFailed(out _, out var accepted)
+        ? throw new InvalidOperationException("Invalid fixture setup") : accepted.Value;
 }
 
 /// <summary>Handwritten adapter implementing only the generated handler contract</summary>
@@ -370,9 +388,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Scenario-selected result with distinct same-status successes</summary>
     /// <param name="input">Generated input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Selected success or declared rejection</returns>
-    public Effect<NoRequirements, ChooseRejection, ChooseSuccess> Choose(ChooseInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, ChooseRejection, ChooseSuccess> Choose(ChooseInput input)
     {
         var fx = new EffectContext<NoRequirements, ChooseRejection>();
         Seen = "{}";
@@ -389,9 +406,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Fixed binary result</summary>
     /// <param name="input">Generated input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>PNG signature bytes</returns>
-    public Effect<NoRequirements, ImageRejection, ImageSuccess> Image(ImageInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, ImageRejection, ImageSuccess> Image(ImageInput input)
     {
         Seen = "{}";
         return new EffectContext<NoRequirements, ImageRejection>().Succeed(FeaturesDriver.Required(ImageSuccess.Loaded.Create(ImmutableArray.Create<byte>(0x89, 0x50, 0x4E, 0x47))));
@@ -399,9 +415,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Echo of every effective input member so provider extraction is observable</summary>
     /// <param name="input">Provider-accepted input with the applied default</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Fixed matched payload</returns>
-    public Effect<NoRequirements, RouteRejection, RouteSuccess> Route(RouteAcceptedInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, RouteRejection, RouteSuccess> Route(RouteAcceptedInput input)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -419,9 +434,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Echo of the exact received bytes</summary>
     /// <param name="input">Generated accepted input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Fixed stored payload</returns>
-    public Effect<NoRequirements, UploadRejection, UploadSuccess> Upload(UploadInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, UploadRejection, UploadSuccess> Upload(UploadInput input)
     {
         Seen = "{\"bytes\":\"" + Convert.ToBase64String(input.Binary.AsSpan()) + "\"}";
         return new EffectContext<NoRequirements, UploadRejection>().Succeed(FeaturesDriver.Required(UploadSuccess.Stored.Create(FeaturesDriver.Required(Payload.Create("stored")))));
@@ -429,9 +443,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Echo of the effective branch that provider acceptance produced</summary>
     /// <param name="input">Provider-accepted input with defaults applied below every omitted member</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Fixed seen payload</returns>
-    public Effect<NoRequirements, DefaultsRejection, DefaultsSuccess> Defaults(DefaultsInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, DefaultsRejection, DefaultsSuccess> Defaults(DefaultsInput input)
     {
         Seen = FeaturesDriver.Describe(input.Branch);
         return new EffectContext<NoRequirements, DefaultsRejection>().Succeed(FeaturesDriver.Required(DefaultsSuccess.Seen.Create(FeaturesDriver.Required(Payload.Create("seen")))));
@@ -439,9 +452,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Echo of the identifier and label that the handler received</summary>
     /// <param name="input">Provider-accepted input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Fixed done payload</returns>
-    public Effect<NoRequirements, MergeRejection, MergeSuccess> Merge(MergeInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, MergeRejection, MergeSuccess> Merge(MergeInput input)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); writer.WriteString("id", input.Id); writer.WriteString("label", input.Label); writer.WriteEndObject(); }
@@ -451,9 +463,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Void result of the bodyless selection scenarios</summary>
     /// <param name="input">Generated input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Body-free success</returns>
-    public Effect<NoRequirements, PingRejection, PingSuccess> Ping(PingInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, PingRejection, PingSuccess> Ping(PingInput input)
     {
         Seen = "{}";
         return new EffectContext<NoRequirements, PingRejection>().Succeed(FeaturesDriver.Required(PingSuccess.Pong.Create()));
@@ -461,9 +472,8 @@ internal sealed class FeatureHandlers : IContractHandlers
 
     /// <summary>Echo of the path and header values that the provider extracted</summary>
     /// <param name="input">Provider-accepted input</param>
-    /// <param name="deadline">Host-owned deadline metadata</param>
     /// <returns>Fixed archived payload</returns>
-    public Effect<NoRequirements, ArchiveRejection, ArchiveSuccess> Archive(ArchiveInput input, DateTimeOffset? deadline)
+    public Effect<NoRequirements, ArchiveRejection, ArchiveSuccess> Archive(ArchiveInput input)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); writer.WriteString("tenant", input.Tenant); writer.WriteString("item", input.Item); writer.WriteString("token", input.Token); writer.WriteEndObject(); }
@@ -477,13 +487,19 @@ internal sealed class LoopbackHandler : HttpMessageHandler
 {
     /// <summary>Provider adapter</summary>
     private readonly FeatureHandlers _handlers;
+    /// <summary>Host-owned clock shared with the consumer boundary</summary>
+    private readonly TimeProvider _clock;
+    /// <summary>Host-owned deadline observation collector</summary>
+    private readonly FeatureDeadlineDiagnostics _diagnostics;
     /// <summary>Recorded request and response as one JSON object</summary>
     /// <value>JSON object text</value>
     public string Wire { get; private set; } = "{}";
 
     /// <summary>Loopback construction</summary>
     /// <param name="handlers">Handwritten provider adapter</param>
-    public LoopbackHandler(FeatureHandlers handlers) { _handlers = handlers; }
+    /// <param name="clock">Host-owned runtime clock</param>
+    /// <param name="diagnostics">Host-owned deadline observation collector</param>
+    public LoopbackHandler(FeatureHandlers handlers, TimeProvider clock, FeatureDeadlineDiagnostics diagnostics) { _handlers = handlers; _clock = clock; _diagnostics = diagnostics; }
 
     /// <summary>Dispatch of the generated client's request into the generated provider</summary>
     /// <param name="request">Generated native request</param>
@@ -492,7 +508,8 @@ internal sealed class LoopbackHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         byte[] requestBody = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken);
-        var exit = await new EffectRuntime<IContractHandlers>(_handlers).Run(ContractProvider.DispatchHttp(request, null), cancellationToken);
+        if (!request.Options.TryGetValue(ContractClient.DeadlineOption, out var deadline)) throw new InvalidOperationException("Missing runtime deadline");
+        var exit = await new EffectRuntime<IContractHandlers>(_handlers, _clock, _diagnostics).Run(ContractProvider.DispatchHttp(request), deadline, _ => new ProviderFailure.Choose(new ChooseFailure.Communication(new("deadline"))), cancellationToken);
         var response = exit is EffectExit<ProviderFailure, HttpResponseMessage>.Succeeded succeeded ? succeeded.Value : new HttpResponseMessage(HttpStatusCode.InternalServerError);
         byte[] responseBody = response.Content is null ? [] : await response.Content.ReadAsByteArrayAsync(cancellationToken);
         using var stream = new MemoryStream();
@@ -545,7 +562,21 @@ internal sealed class UnselectedTransport : IIpcTransport
     /// <param name="command">Generated command name</param>
     /// <param name="parameters">Generated JSON parameters object</param>
     /// <param name="deadline">Forwarded host deadline</param>
+    /// <param name="cancellationToken">Runtime-owned cancellation notification</param>
     /// <returns>Expected communication failure</returns>
-    public Effect<NoRequirements, CommunicationFailure, string> Invoke(string command, string parameters, DateTimeOffset? deadline) =>
-        new EffectContext<NoRequirements, CommunicationFailure>().Fail<string>(new CommunicationFailure("ipc-not-selected"));
+    public ValueTask<Result<string, CommunicationFailure>> Invoke(string command, string parameters, Deadline deadline, CancellationToken cancellationToken) =>
+        new(Result.Failed<CommunicationFailure>(new CommunicationFailure("ipc-not-selected")));
+}
+
+/// <summary>Concrete collection of feature runtime deadline overruns</summary>
+internal sealed class FeatureDeadlineDiagnostics : IDeadlineDiagnostics
+{
+    /// <summary>Recorded deadline observations</summary>
+    /// <value>Absolute deadlines paired with their observed overruns</value>
+    public List<(Deadline Deadline, TimeSpan Overrun)> Overruns { get; } = [];
+
+    /// <summary>Retention of a runtime deadline observation</summary>
+    /// <param name="deadline">Original execution deadline</param>
+    /// <param name="overrun">Observed positive overrun</param>
+    public void RecordOverrun(Deadline deadline, TimeSpan overrun) => Overruns.Add((deadline, overrun));
 }

@@ -4,26 +4,33 @@ import { support, type Support } from "./support.js";
 export const stateSupport: readonly Support[] = [
   support(
     "State",
-    String.raw`/// Mutable state owned exclusively by one incomplete boundary graph
+    String.raw`/// Index of a path segment, with zero denoting the document root
+type _Path = usize;
+/// Mutable state owned exclusively by one incomplete boundary graph
 #[derive(Default)]
 struct State {
     /// Known-member violations collected so far
     violations: Vec<Violation>,
     /// Unknown member observations collected so far
     diagnostics: Vec<Diagnostic>,
+    /// Parent-linked path segments, materialized only for observations
+    paths: Vec<(_Path, String)>,
 }
 impl State {
-    /// Violation accumulation at a known member
-    ///
-    /// - path: rejected JSON pointer
-    /// - rule: semantic rejection identifier
-    fn reject(&mut self, path: &str, rule: &str) { self.violations.push(Violation { path: path.into(), rule: rule.into() }); }
-    /// Publication of only a complete validated graph
-    ///
-    /// - value: completed graph candidate
-    /// - Return: accepted graph or all collected violations
-    /// # Errors
-    /// Any collected violation or an absent candidate
+    /// Materialize one observed location as an RFC 6901 pointer
+    fn pointer(&self, mut path: _Path) -> String {
+        let mut segments = Vec::new();
+        while path != 0 { let (parent, segment) = &self.paths[path - 1]; segments.push(segment); path = *parent; }
+        let mut result = String::new();
+        for segment in segments.into_iter().rev() {
+            result.push('/');
+            for character in segment.chars() { match character { '~' => result.push_str("~0"), '/' => result.push_str("~1"), other => result.push(other) } }
+        }
+        result
+    }
+    /// Record a semantic violation without retaining candidate data
+    fn reject(&mut self, path: _Path, rule: &str) { self.violations.push(Violation { path: self.pointer(path), rule: rule.into() }); }
+    /// Publish only a complete validated graph
     fn finish<T>(self, value: Option<T>) -> Result<Accepted<T>, ValidationFailure> {
         match value {
             Some(value) if self.violations.is_empty() => Ok(Accepted { value, diagnostics: self.diagnostics }),
@@ -34,94 +41,63 @@ impl State {
 `,
     "type",
   ),
-  support(
-    "pointer",
-    String.raw`/// RFC 6901 field pointer construction
-///
-/// - path: parent pointer
-/// - key: member name
-/// - Return: escaped member pointer
-fn pointer(path: &str, key: &str) -> String { format!("{}/{}", path, key.replace('~', "~0").replace('/', "~1")) }
+  {
+    reaches: /\.child\(/,
+    source: String.raw`impl State {
+    /// Retain only an immediate segment and its parent location
+    fn child(&mut self, parent: _Path, key: impl Into<String>) -> _Path { self.paths.push((parent, key.into())); self.paths.len() }
+}
 `,
-  ),
+  },
+  {
+    reaches: /\.observe\(/,
+    source: String.raw`impl State {
+    /// Observe an unknown key without retaining its value
+    fn observe(&mut self, path: _Path, key: String) { self.diagnostics.push(Diagnostic { path: self.pointer(path), key }); }
+}
+`,
+  },
   support(
     "unknown",
-    String.raw`/// Unknown-member diagnostics without retention of values
-///
-/// - object: remaining members after known-member removal
-/// - path: pointer of the object that contains the unknown members
-/// - state: boundary-local diagnostic sink
-fn unknown(object: Map<String, Value>, path: &str, state: &mut State) {
-    for (key, _) in object { state.diagnostics.push(Diagnostic { path: path.into(), key }); }
+    String.raw`/// Observe remaining object members without retaining their values
+fn unknown(object: std::collections::BTreeMap<String, usize>, path: _Path, state: &mut State) {
+    for (key, _) in object { state.observe(path, key); }
 }
 `,
   ),
   support(
     "object",
-    String.raw`/// Object extraction with typed rejection
-///
-/// - value: owned incoming JSON
-/// - path: object pointer
-/// - state: boundary-local violation sink
-/// - Return: owned object members
-fn object(value: Value, path: &str, state: &mut State) -> Option<Map<String, Value>> {
-    if let Value::Object(value) = value { Some(value) } else { state.reject(path, if value.is_null() { "null" } else { "type" }); None }
+    String.raw`/// Extract an immediate object shell from flat parser storage
+fn object(value: _JsonNode, path: _Path, state: &mut State) -> Option<std::collections::BTreeMap<String, usize>> {
+    if let _JsonNode::Object(value) = value { Some(value) } else { state.reject(path, if value.is_null() { "null" } else { "type" }); None }
 }
 `,
   ),
   support(
     "required",
-    String.raw`/// Required member presence independent from JSON null
-///
-/// - value: removed member
-/// - path: member pointer
-/// - state: boundary-local violation sink
-/// - Return: present JSON value
-fn required(value: Option<Value>, path: &str, state: &mut State) -> Option<Value> {
+    String.raw`/// Distinguish a missing member from a present null token
+fn required(value: Option<usize>, path: _Path, state: &mut State) -> Option<usize> {
     match value { Some(value) => Some(value), None => { state.reject(path, "required"); None } }
 }
 `,
   ),
   support(
-    "nullable",
-    String.raw`/// Nullable value interpretation independent from omission
-///
-/// - value: present JSON value
-/// - path: member pointer
-/// - state: boundary-local diagnostics
-/// - decode: non-null value decoder
-/// - Return: present null or decoded value
-fn nullable<T>(value: Value, path: &str, state: &mut State, decode: impl FnOnce(Value, &str, &mut State) -> Option<T>) -> Option<Option<T>> {
-    if value.is_null() { Some(None) } else { decode(value, path, state).map(Some) }
-}
-`,
-  ),
-  support(
     "text",
-    String.raw`/// Scalar text extraction with null-specific rejection
-///
-/// - value: owned input JSON
-/// - path: member pointer
-/// - state: boundary-local sink
-/// - Return: moved string storage
-fn text(value: Value, path: &str, state: &mut State) -> Option<String> {
-    match value { Value::String(value) => Some(value), other => { state.reject(path, if other.is_null() { "null" } else { "type" }); None } }
+    String.raw`/// Move a scalar string token out of flat parsing storage
+fn text(value: _JsonNode, path: _Path, state: &mut State) -> Option<String> {
+    match value { _JsonNode::String(value) => Some(value), other => { state.reject(path, if other.is_null() { "null" } else { "type" }); None } }
 }
 `,
   ),
   support(
     "number",
-    String.raw`/// Numeric extraction under the selected wire encoding
-///
-/// - value: owned input JSON
-/// - string_encoding: explicit numeric string representation
-/// - path: member pointer
-/// - state: boundary-local sink
-/// - Return: adopted exact JSON number
-fn number(value: Value, string_encoding: bool, path: &str, state: &mut State) -> Option<Number> {
+    String.raw`/// Extract an exact numeric token under its declared wire encoding
+fn number(value: _JsonNode, string_encoding: bool, path: _Path, state: &mut State) -> Option<Number> {
     match value {
-        Value::Number(value) if !string_encoding => Some(value),
-        Value::String(value) if string_encoding => match serde_json::from_str::<Value>(&value) { Ok(Value::Number(_)) if value.trim() == value => Some(Number::from_string_unchecked(value)), _ => { state.reject(path, "format"); None } },
+        _JsonNode::Number(value) if !string_encoding => Some(value),
+        _JsonNode::String(value) if string_encoding => {
+            if valid_number(&value) { Some(Number::from_string_unchecked(value)) } else { state.reject(path, "format"); None }
+        },
         other => { state.reject(path, if other.is_null() { "null" } else { "type" }); None },
     }
 }
@@ -129,37 +105,15 @@ fn number(value: Value, string_encoding: bool, path: &str, state: &mut State) ->
   ),
   support(
     "assert_valid",
-    String.raw`/// Defect assertion that a value claimed valid carries no violation
-///
-/// - state: violations collected while checking the value
-/// - subject: description of the value for the defect message
-/// # Panics
-/// A violation was collected, which means the caller bypassed validated construction
+    String.raw`/// Assert the trusted construction invariant at an unwrapped scalar entrypoint
 fn assert_valid(state: &State, subject: &str) {
     if !state.violations.is_empty() { panic!("{subject}: {:?}", state.violations); }
 }
 `,
   ),
   support(
-    "finite_number",
-    String.raw`/// JSON number of a finite binary float
-///
-/// - value: finite float validated before encoding
-/// - Return: JSON number
-/// # Panics
-/// A non-finite float, which construction and decoding reject before any encoding
-fn finite_number(value: f64) -> Value {
-    match Number::from_f64(value) { Some(number) => Value::Number(number), None => panic!("a non-finite float has no JSON number") }
-}
-`,
-  ),
-  support(
     "filled",
-    String.raw`/// Provider default substitution for an omitted member
-///
-/// - value: member as supplied
-/// - default: construction of the contract default, run only for an omitted member
-/// - Return: the supplied member or the default
+    String.raw`/// Fill only omitted provider members, never explicit null or invalid input
 fn filled<T>(value: Option<T>, default: impl FnOnce() -> T) -> T {
     match value { Some(value) => value, None => default() }
 }

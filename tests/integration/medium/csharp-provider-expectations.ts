@@ -93,12 +93,7 @@ export async function expectMalformedRequests(origin: string): Promise<void> {
     ["array body", json, "[]", { path: "", rule: "type" }],
     ["empty object body", json, "{}", { path: "/input", rule: "required" }],
     ["empty body", json, "", { path: "/input", rule: "required" }],
-    [
-      "unpaired surrogate escape in a value",
-      json,
-      surrogate,
-      { path: "/input/label", rule: "format" },
-    ],
+    ["unpaired surrogate escape in a value", json, surrogate, { path: "", rule: "json" }],
   ];
   for (const [name, headers, payload, violation] of cases) {
     const response = await exchange(origin, "POST", "/submit", headers, payload);

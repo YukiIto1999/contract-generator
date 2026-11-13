@@ -94,7 +94,7 @@ pub trait IpcTransport: Send + Sync {
     /// - Return: resolved declared result envelope or expected communication termination
     /// # Errors
     /// Typed communication failures, cancellation or deadline expiry from the native transport
-    fn invoke(&self, command: &str, parameters: serde_json::Value, token: &CancellationToken, deadline: Option<Instant>) -> impl Future<Output = Result<serde_json::Value, CommunicationFailure>> + Send;
+    fn invoke(&self, command: &str, parameters: String, token: &CancellationToken, deadline: Option<Instant>) -> impl Future<Output = Result<String, CommunicationFailure>> + Send;
 }
 /// Media-type essence normalization without parameter matching
 ///

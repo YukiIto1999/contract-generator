@@ -83,11 +83,11 @@ internal sealed class ReadContext
     /// <summary>Violation accumulation</summary>
     /// <param name="path">Pointer of the offending value</param>
     /// <param name="rule">Semantic rule that the value broke</param>
-    internal void Add(string path, string rule) => (_violations ??= new()).Add(new(path, rule));
+    internal void Add(Wire.Path path, string rule) => (_violations ??= new()).Add(new(path, rule));
     /// <summary>Unknown property accumulation</summary>
     /// <param name="path">Pointer of the containing object</param>
     /// <param name="key">Unknown wire name</param>
-    internal void Unknown(string path, string key) => (_diagnostics ??= new()).Add(new(path, key));
+    internal void Unknown(Wire.Path path, string key) => (_diagnostics ??= new()).Add(new(path, key));
     /// <summary>Independent value-validation checkpoint</summary>
     /// <value>Number of violations recorded so far</value>
     internal int ViolationCount => _violations?.Count ?? 0;
@@ -99,11 +99,8 @@ internal sealed class ReadContext
     /// <param name="value">Candidate that rejection hides</param>
     /// <returns>Accepted value or violations</returns>
     internal Result<Accepted<T>, ContractFailure> Finish<T>(T value) => IsValid
-        ? new Result<Accepted<T>, ContractFailure>.Succeeded(new(value, _diagnostics?.ToImmutableArray() ?? ImmutableArray<UnknownProperty>.Empty))
-        : new Result<Accepted<T>, ContractFailure>.Failed(Failure);
+        ? Result.Succeeded<Accepted<T>>(new(value, _diagnostics?.ToImmutableArray() ?? ImmutableArray<UnknownProperty>.Empty))
+        : Result.Failed(Failure);
 }
 
-/// <summary>Reflection-free standard JSON parser metadata</summary>
-[System.Text.Json.Serialization.JsonSerializable(typeof(JsonElement))]
-internal partial class ContractJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
 `;

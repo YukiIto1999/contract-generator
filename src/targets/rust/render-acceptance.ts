@@ -1,145 +1,12 @@
-import type {
-  ArrayType,
-  ContractType,
-  Field,
-  ObjectType,
-  Operation,
-  TypeUse,
-  UnionType,
-} from "../../model/contract-model.js";
+import type { ContractType, ObjectType, Operation } from "../../model/contract-model.js";
 import { defaulted } from "./accepting.js";
 import { node, type RustContext } from "./context.js";
-import { defaultValue } from "./defaults.js";
-import { doc, key, snake, stem } from "./naming.js";
-import { tuplePermission } from "./render-object.js";
-import { fieldType } from "./storage.js";
+import { key, snake, stem } from "./naming.js";
+import { objectValue, renderObjectStorage } from "./render-storage.js";
+import { tupleVariant } from "./render-enum.js";
+import { renderAcceptanceArms } from "./render-acceptance-arms.js";
 
-/** Whether provider acceptance must rebuild the declaration a use refers to
- * @param ctx - Rendering context
- * @param use - Resolved use
- * @returns True when a default is filled at some depth below the use
- */
-function accepts(ctx: RustContext, use: TypeUse): boolean {
-  return ctx.accepting.has(use.id);
-}
-
-/** Acceptance of one owned use value
- * @param ctx - Rendering context
- * @param use - Resolved use
- * @param expression - Identifier of the owned use value
- * @returns Rust expression of the use type with defaults applied below it
- */
-function acceptUse(ctx: RustContext, use: TypeUse, expression: string): string {
-  const call = `_accept_${key(node(ctx, use.id))}`;
-  const boxed = ctx.boxed.has(use);
-  if (use.nullable) return `${expression}.map(${boxed ? `|item| Box::new(${call}(*item))` : call})`;
-  return boxed ? `Box::new(${call}(*${expression}))` : `${call}(${expression})`;
-}
-
-/** Function applying acceptance to an owned use value for an iterator or Option map
- * @param ctx - Rendering context
- * @param use - Resolved use
- * @returns Rust function path or closure
- */
-function acceptMapper(ctx: RustContext, use: TypeUse): string {
-  const call = `_accept_${key(node(ctx, use.id))}`;
-  const boxed = ctx.boxed.has(use);
-  if (!use.nullable) return boxed ? `|item| Box::new(${call}(*item))` : call;
-  return boxed ? `|item| item.map(|inner| Box::new(${call}(*inner)))` : `|item| item.map(${call})`;
-}
-
-/** Statement applying defaults to one destructured field
- * @param ctx - Rendering context
- * @param field - Object field
- * @param stronger - Whether a defaulted field leaves its optional wrapper behind
- * @returns Rust statement rebinding `field_<name>`, or an empty string for an untouched field
- */
-function fieldStatement(ctx: RustContext, field: Field, stronger: boolean): string {
-  const name = `field_${snake(field.name)}`;
-  if (defaulted(field)) {
-    const fallback = defaultValue(ctx, field);
-    const resolved = accepts(ctx, field.type)
-      ? `match ${name} { Some(item) => ${acceptUse(ctx, field.type, "item")}, None => ${fallback} }`
-      : `filled(${name}, || ${fallback})`;
-    return `let ${name} = ${stronger ? resolved : `Some(${resolved})`};`;
-  }
-  if (!accepts(ctx, field.type)) return "";
-  return field.optional
-    ? `let ${name} = ${name}.map(${acceptMapper(ctx, field.type)});`
-    : `let ${name} = ${acceptUse(ctx, field.type, name)};`;
-}
-
-/** Destructuring, default application and reconstruction of an object
- * @param ctx - Rendering context
- * @param type - Object declaration
- * @param target - Rust struct built from the processed members
- * @param stronger - Whether defaulted fields become required in the target
- * @returns Rust statements yielding the target value
- */
-function rebuild(ctx: RustContext, type: ObjectType, target: string, stronger: boolean): string {
-  const names = type.fields.map((field) => `field_${snake(field.name)}`);
-  const members = type.fields.map((field, index) => `${snake(field.name)}: ${names[index]}`);
-  return `let (${names.map((name) => `${name},`).join(" ")}) = value.into_parts();
-    ${type.fields.map((field) => fieldStatement(ctx, field, stronger)).join("\n")}
-    ${target} { ${members.join(", ")} }`;
-}
-
-/** Default application below an input-reachable object
- * @param ctx - Rendering context
- * @param type - Object declaration
- * @returns Rust private function
- */
-function acceptObject(ctx: RustContext, type: ObjectType): string {
-  return `/// Provider default application at every depth below ${type.name}
-///
-/// - value: accepted pre-default object
-/// - Return: same object with every omitted defaulted member filled
-fn _accept_${key(type)}(value: ${type.name}) -> ${type.name} {
-    ${rebuild(ctx, type, type.name, false)}
-}
-`;
-}
-
-/** Default application inside every element of an array
- * @param ctx - Rendering context
- * @param type - Array declaration
- * @returns Rust private function
- */
-function acceptArray(ctx: RustContext, type: ArrayType): string {
-  const mapper = acceptMapper(ctx, type.element);
-  return `/// Provider default application inside the elements of ${type.name}
-///
-/// - value: accepted pre-default collection
-/// - Return: collection whose elements carry their defaults
-fn _accept_${key(type)}(value: ${type.name}) -> ${type.name} {
-    ${type.name}(value.into_vec().into_iter().map(${mapper}).collect())
-}
-`;
-}
-
-/** Default application inside the selected case of a union
- * @param ctx - Rendering context
- * @param type - Union declaration
- * @returns Rust private function
- */
-function acceptUnion(ctx: RustContext, type: UnionType): string {
-  const arms = type.variants.map((variant) => {
-    const payload = accepts(ctx, variant.type)
-      ? acceptUse(ctx, variant.type, "payload")
-      : "payload";
-    return `${type.name}Case::${variant.name}(payload) => ${type.name}(${type.name}Case::${variant.name}(${payload})),`;
-  });
-  return `/// Provider default application inside the selected case of ${type.name}
-///
-/// - value: accepted pre-default union
-/// - Return: union whose payload carries its defaults
-fn _accept_${key(type)}(value: ${type.name}) -> ${type.name} {
-    match value.into_case() { ${arms.join("\n")} }
-}
-`;
-}
-
-/** Effective handler input without same-guarantee duplication
+/** Required-presence provider input after omission-only defaults
  * @param ctx - Rendering context
  * @param operation - Canonical operation
  * @returns Accepted provider input type
@@ -151,94 +18,134 @@ export function acceptedType(ctx: RustContext, operation: Operation): string {
     : input.name;
 }
 
-/** Operation input whose own optional fields take provider defaults
+/** Provider-effective root input with canonical child handles
  * @param ctx - Rendering context
  * @param operation - Canonical operation
- * @param input - Input object
- * @returns Stronger effective input declaration with its acceptance function
+ * @param input - Input object declaration
+ * @returns Stronger root storage and public acceptance function
  */
-function strongerInput(ctx: RustContext, operation: Operation, input: ObjectType): string {
-  const accepted = `${stem(operation)}Accepted`;
-  const effective = (field: Field): string => fieldType(ctx, field, true);
-  const members = input.fields.map(
-    (field) =>
-      `${doc(field.description, "Accepted effective handler member")}\n${snake(field.name)}: ${effective(field)},`,
-  );
-  const accessors = input.fields.map(
-    (field) =>
-      `/// Shared effective handler input\n///\n/// - self: accepted provider input\n/// - Return: stronger effective member presence\npub fn ${snake(field.name)}(&self) -> &${effective(field)} { &self.${snake(field.name)} }`,
-  );
-  const parts = input.fields.map((field) => `${effective(field)},`).join(" ");
-  const moved = input.fields.map((field) => `self.${snake(field.name)},`).join(" ");
-  return `
-/// Provider-effective inputs after omission-only default application
-#[derive(Debug, Clone, PartialEq)]
-pub struct ${accepted} { ${members.join("\n")} }
-impl ${accepted} {
-${accessors.join("\n")}
-/// Consuming effective input extraction
+function operationAcceptance(ctx: RustContext, operation: Operation, input: ObjectType): string {
+  const target = acceptedType(ctx, operation);
+  const call = ctx.accepting.has(input.id) ? `_accept_${key(input)}(value)` : "value";
+  const stronger = target !== input.name;
+  const body = stronger
+    ? `let value = ${call}; let (${input.fields.map((field) => `field_${snake(field.name)},`).join(" ")}) = value.into_parts();
+    ${objectValue(
+      input,
+      input.fields.map(
+        (field) =>
+          `${snake(field.name)}: ${defaulted(field) ? `match field_${snake(field.name)} { Some(value) => value, None => panic!("broken provider completion invariant") }` : `field_${snake(field.name)}`}`,
+      ),
+      target,
+    )}`
+    : call;
+  return `${stronger ? renderObjectStorage(ctx, input, target, true) : ""}
+/// Provider-only omission default application without child revalidation
 ///
-/// - self: accepted provider input
-/// - Return: moved effective members
-${[tuplePermission(input.fields.length), `pub fn into_parts(self) -> (${parts}) { (${moved}) }`].filter(Boolean).join("\n")}
-}
-/// Provider-only omission default application without redecoding children
-///
-/// - value: already accepted pre-default input
-/// - Return: stronger effective input
-pub fn accept_${snake(operation.name)}(value: ${input.name}) -> ${accepted} {
-    ${rebuild(ctx, input, accepted, true)}
-}`;
-}
-
-/** Acceptance entry point of one operation
- * @param ctx - Rendering context
- * @param operation - Canonical operation
- * @returns Rust declarations reachable from the generated provider
- */
-function operationAcceptance(ctx: RustContext, operation: Operation): string {
-  const input = node(ctx, operation.input);
-  if (input.kind !== "object") return "";
-  if (input.fields.some(defaulted)) return strongerInput(ctx, operation, input);
-  const body = ctx.accepting.has(input.id) ? `_accept_${key(input)}(value)` : "value";
-  return `/// Provider acceptance for inputs without a default on their own members
-///
-/// - value: accepted operation parameters
-/// - Return: the parameters with nested provider defaults applied
-pub fn accept_${snake(operation.name)}(value: ${input.name}) -> ${input.name} { ${body} }
+/// - value: accepted pre-default operation input
+/// - Return: effective handler input with nested defaults
+${stronger ? "/// # Panics\n/// Broken internal provider completion invariant\n" : ""}pub fn accept_${snake(operation.name)}(value: ${input.name}) -> ${target} { ${body} }
 `;
 }
 
-/** Private default application of one declaration below an operation input
- * @param ctx - Rendering context
- * @param type - Declaration
- * @returns Rust private function, or an empty string when the declaration needs none
+/** Borrowed acceptance task pair for a changeable declaration
+ * @param ctx - Generation context
+ * @param type - Input-reachable declaration
+ * @returns Visit and post-order completion task declarations
  */
-function acceptDeclaration(ctx: RustContext, type: ContractType): string {
-  if (!ctx.accepting.has(type.id)) return "";
-  const entry = ctx.model.operations.find((operation) => operation.input === type.id);
-  switch (type.kind) {
-    case "object":
-      return entry !== undefined && type.fields.some(defaulted) ? "" : acceptObject(ctx, type);
-    case "array":
-      return acceptArray(ctx, type);
-    case "union":
-      return acceptUnion(ctx, type);
-    case "scalar":
-    case "enum":
-    case "literal":
-      return "";
-  }
+function taskVariants(ctx: RustContext, type: ContractType): string {
+  const fields: [string, string][] = [
+    [`&'a ${type.name}`, "Borrowed original canonical value"],
+    ["usize", "Changed-result destination"],
+  ];
+  const visit = tupleVariant(`Visit${type.name}`, `Provider traversal of ${type.name}`, fields);
+  if (type.kind !== "object" || type.fields.some((field) => ctx.accepting.has(field.type.id)))
+    fields.push(["usize", "Immediate child result offset"]);
+  return (
+    visit + "\n" + tupleVariant(`Done${type.name}`, `Post-order completion of ${type.name}`, fields)
+  );
 }
 
-/** Provider-effective input declarations and default application at every depth
+/** Acceptance state declarations restricted to changeable subtrees
  * @param ctx - Generation context
- * @returns Rust acceptance functions and effective input declarations
+ * @param types - Input-reachable declarations with defaults
+ * @returns Rust replacement and task declarations
+ */
+function declarations(ctx: RustContext, types: ContractType[]): string {
+  return `/// Changed canonical subtrees produced by provider defaults
+#[derive(Clone)]
+enum _Accepted { ${types.map((type) => tupleVariant(type.name, `Changed ${type.name} subtree`, [[type.name, "Owned replacement canonical value"]])).join("\n")} }
+/// Borrowed provider traversal with post-order reconstruction
+enum _Accept<'a> { ${types.map((type) => taskVariants(ctx, type)).join("\n")} }
+`;
+}
+
+/** Provider traversal with shared subtree completion memoization
+ * @param ctx - Generation context
+ * @param types - Input-reachable declarations with defaults
+ * @returns Rust iterative default transformation function
+ */
+function traversal(ctx: RustContext, types: ContractType[]): string {
+  const memoized = types.some(
+    (type) => type.kind === "array" || (type.kind === "object" && ctx.shared.has(type.id)),
+  );
+  const grows = types.some(
+    (type) =>
+      type.kind !== "object" || type.fields.some((field) => ctx.accepting.has(field.type.id)),
+  );
+  return `/// Provider default transformation without recursive calls
+///
+/// - root: borrowed root with destination zero
+/// - Return: changed canonical root or unchanged identity
+fn __accept_graph(root: _Accept<'_>) -> Option<_Accepted> {
+  let mut values = ${grows ? "vec![None]" : "[None]"};
+  let mut pending = vec![root];
+  ${memoized ? "let mut memo: std::collections::HashMap<(usize, usize), Option<_Accepted>> = std::collections::HashMap::new();" : ""}
+  while let Some(task) = pending.pop() { match task { ${types.map((type, index) => renderAcceptanceArms(ctx, type, index)).join("\n")} } }
+  values[0].take()
+}
+`;
+}
+
+/** Root acceptance entry point preserving unchanged identity
+ * @param type - Canonical operation input declaration
+ * @param multiple - Presence of other accepted result kinds
+ * @returns Rust private provider acceptance entry point
+ */
+function entrypoint(type: ContractType, multiple: boolean): string {
+  return `/// Provider default application preserving unchanged canonical identity
+///
+/// - value: accepted pre-default value
+/// - Return: transformed or unchanged canonical value
+fn _accept_${key(type)}(value: ${type.name}) -> ${type.name} {
+  match __accept_graph(_Accept::Visit${type.name}(&value, 0)) { Some(_Accepted::${type.name}(result)) => result, None => value, ${multiple ? '_ => unreachable!("matching provider acceptance root")' : ""} }
+}
+`;
+}
+
+/** Iterative provider defaults with copying confined to changed ancestors
+ * @param ctx - Generation context
+ * @returns Acceptance worklist and effective input declarations
  */
 export function renderAcceptance(ctx: RustContext): string {
-  const declarations = ctx.model.types.map((type) => acceptDeclaration(ctx, type)).join("");
+  const types = ctx.model.types.filter(
+    (type) =>
+      ctx.accepting.has(type.id) &&
+      (type.kind === "object" || type.kind === "array" || type.kind === "union"),
+  );
+  const graph = types.length === 0 ? "" : declarations(ctx, types) + traversal(ctx, types);
+  const roots = types
+    .filter((type) => ctx.model.operations.some((operation) => operation.input === type.id))
+    .map((type) => entrypoint(type, types.length > 1))
+    .join("\n");
   return (
-    declarations +
-    ctx.model.operations.map((operation) => operationAcceptance(ctx, operation)).join("\n")
+    graph +
+    roots +
+    ctx.model.operations
+      .map((operation) => {
+        const input = node(ctx, operation.input);
+        return input.kind === "object" ? operationAcceptance(ctx, operation, input) : "";
+      })
+      .join("\n")
   );
 }

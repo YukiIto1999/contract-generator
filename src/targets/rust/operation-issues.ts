@@ -18,6 +18,41 @@ const methods = new Set([
   "CONNECT",
 ]);
 
+/** Operation wire functions conflicting with existing generated codec names
+ * @param operation - Operation publishing payload and envelope codecs
+ * @param functions - Already claimed generated function names
+ * @param report - Issue sink
+ */
+function checkOperationFunctions(
+  operation: Operation,
+  functions: Set<string>,
+  report: Report,
+): void {
+  for (const suffix of [
+    ...(operation.ipc === undefined ? [] : ["ipc_result"]),
+    ...(operation.http === undefined ? [] : ["http_request"]),
+  ]) {
+    for (const verb of ["decode", "encode"]) {
+      const name = `${verb}_${snake(operation.name)}_${suffix}`;
+      if (functions.has(name))
+        report(
+          operation.origin,
+          operation.id,
+          `Rust operation function ${name} collides with a canonical type codec`,
+        );
+      functions.add(name);
+    }
+  }
+  for (const outcome of operation.outcomes)
+    for (const verb of ["decode", "encode"])
+      if (functions.has(`${verb}_${snake(operation.name)}_${snake(outcome.name)}`))
+        report(
+          outcome.origin,
+          operation.id,
+          `Rust outcome function ${verb}_${snake(operation.name)}_${snake(outcome.name)} collides with a canonical type codec`,
+        );
+}
+
 /** Generated operation type and function names that collide with canonical declarations
  * @param model - Complete normalized contract
  * @param report - Issue sink
@@ -27,10 +62,7 @@ export function checkOperationNames(model: ContractModel, report: Report): void 
   const nodes = new Map(model.types.map((type) => [type.id, type]));
   const functions = new Set(
     model.types.flatMap((type) =>
-      ["decode", "encode"].flatMap((verb) => [
-        `${verb}_${snake(type.name)}`,
-        `${verb}_${snake(type.name)}_value`,
-      ]),
+      ["decode", "encode"].map((verb) => `${verb}_${snake(type.name)}`),
     ),
   );
   for (const operation of model.operations) {
@@ -42,6 +74,9 @@ export function checkOperationNames(model: ContractModel, report: Report): void 
       `${stem(operation)}Success`,
       `${stem(operation)}Rejection`,
       ...(accepted ? [`${stem(operation)}Accepted`] : []),
+      ...(operation.http === undefined
+        ? []
+        : [`${stem(operation)}HttpPlacements`, `${stem(operation)}HttpRequest`]),
     ]) {
       if (names.has(name))
         report(
@@ -51,14 +86,7 @@ export function checkOperationNames(model: ContractModel, report: Report): void 
         );
       names.add(name);
     }
-    for (const outcome of operation.outcomes)
-      for (const verb of ["decode", "encode"])
-        if (functions.has(`${verb}_${snake(operation.name)}_${snake(outcome.name)}`))
-          report(
-            outcome.origin,
-            operation.id,
-            `Rust outcome function ${verb}_${snake(operation.name)}_${snake(outcome.name)} collides with a canonical type codec`,
-          );
+    checkOperationFunctions(operation, functions, report);
     if (input?.kind !== "object")
       report(operation.origin, operation.id, "Operation input must resolve to a canonical object");
   }

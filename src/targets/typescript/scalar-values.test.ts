@@ -4,10 +4,13 @@ import type { ContractModel } from "../../model/contract-model.js";
 import { loadGenerated, type LoadedModule } from "./load-generated.js";
 import { scalarType } from "./model-builders.js";
 
-/** Violation list or accepted value of a generated codec call */
+/** Boundary rejection or accepted value of a generated codec call */
 type Outcome = Result<
   { readonly value: unknown },
-  readonly { readonly path: string; readonly rule: string }[]
+  {
+    readonly violations: readonly { readonly path: string; readonly rule: string }[];
+    readonly diagnostics: readonly { readonly path: string; readonly key: string }[];
+  }
 >;
 
 /** Public entrypoints of a generated scalar codec */
@@ -51,7 +54,7 @@ function codec(name: string): ScalarCodec {
  * @returns Located violations, empty for an accepted value
  */
 function violations(outcome: Outcome): readonly { readonly path: string; readonly rule: string }[] {
-  return outcome.isErr() ? outcome.error : [];
+  return outcome.isErr() ? outcome.error.violations : [];
 }
 
 test("utcDateTime accepts the zero offset spellings in construction and decoding", () => {

@@ -16,7 +16,7 @@ export const envelopeJson =
  * @param result - Generated public acceptance
  * @returns Accepted value
  */
-export function accepted<T>(result: Result<C.Accepted<T>, readonly C.Violation[]>): T {
+export function accepted<T>(result: Result<C.Accepted<T>, C.BoundaryRejection>): T {
   assert.equal(result.isOk(), true, result.isErr() ? JSON.stringify(result.error) : "");
   if (result.isErr()) throw new Error("Expected accepted fixture");
   return result.value.value;

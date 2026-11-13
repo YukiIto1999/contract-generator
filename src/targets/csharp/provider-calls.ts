@@ -1,5 +1,4 @@
 import type { Operation } from "../../model/contract-model.js";
-import { acceptedType } from "./acceptance.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { lines, name, pascal } from "./naming.js";
@@ -14,20 +13,18 @@ import { outcomeSwitch, renderResponseMethods } from "./provider-response.js";
 export function renderDirect(c: CSharpContext, operation: Operation): string {
   const failure = opName(operation, "Failure");
   const success = opName(operation, "Success");
-  const effective = acceptedType(c, operation);
-  const accepted = `Result<Accepted<${effective}>, ContractFailure>`;
   const acceptance = opName(operation, "Acceptance");
   return lines(
     doc(
       "Direct provider acceptance before handler dispatch",
-      ["input", "deadline"],
+      ["input"],
       "Typed handler outcome or normal input failure",
     ),
-    `public static Effect<IContractHandlers, ${failure}, ${success}> ${name(pascal(operation.name))}(${c.type(operation.input)} input, DateTimeOffset? deadline) {`,
+    `public static Effect<IContractHandlers, ${failure}, ${success}> ${name(pascal(operation.name))}(${c.type(operation.input)} input) {`,
     `var fx = new EffectContext<IContractHandlers, ${failure}>();`,
-    `return fx.Try<bool>((_, token) => { token.ThrowIfCancellationRequested(); return new ValueTask<bool>(true); }, exception => throw exception).Bind(_ => fx.Sync(() => ${acceptance}.Accept(input))).Bind(accepted => {`,
-    `if (accepted is ${accepted}.Failed invalid) return fx.Fail<${success}>(new ${failure}.InvalidInput(invalid.Failure));`,
-    `return fx.Access(handlers => handlers.${name(pascal(operation.name))}(((${accepted}.Succeeded)accepted).Value.Value, deadline).MapFailure(rejection => (${failure})new ${failure}.Declared(rejection)));`,
+    `return fx.Sync(() => ${acceptance}.Accept(input)).Bind(accepted => {`,
+    `if (accepted.IsFailed(out var invalid, out var inputValue)) return fx.Fail<${success}>(new ${failure}.InvalidInput(invalid.Failure));`,
+    `return fx.Access(handlers => handlers.${name(pascal(operation.name))}(inputValue.Value).MapFailure(rejection => (${failure})new ${failure}.Declared(rejection)));`,
     "});",
     "}",
   );
@@ -40,22 +37,20 @@ export function renderDirect(c: CSharpContext, operation: Operation): string {
  */
 export function renderIpcProvider(c: CSharpContext, operation: Operation): string {
   const failure = opName(operation, "Failure");
-  const input = c.type(operation.input);
-  const decoded = `Result<Accepted<${input}>, ContractFailure>`;
   return lines(
     doc(
       "IPC request acceptance and resolved rejection dispatch",
-      ["parameters", "deadline"],
+      ["parameters"],
       "Resolved response envelope or input rejection",
       {
         throws: [["InvalidOperationException", "A handler result that breaks the contract"]],
       },
     ),
-    `public static Effect<IContractHandlers, ${failure}, string> ${name(pascal(operation.name) + "Ipc")}(string parameters, DateTimeOffset? deadline) {`,
+    `public static Effect<IContractHandlers, ${failure}, string> ${name(pascal(operation.name) + "Ipc")}(string parameters) {`,
     `var fx = new EffectContext<IContractHandlers, ${failure}>();`,
     `var decoded = ${c.codec(operation.input)}.Decode(parameters, "ipc");`,
-    `if (decoded is ${decoded}.Failed failed) return fx.Fail<string>(new ${failure}.InvalidInput(failed.Failure));`,
-    `return ${name(pascal(operation.name))}(((${decoded}.Succeeded)decoded).Value.Value, deadline)`,
+    `if (decoded.IsFailed(out var failed, out var inputValue)) return fx.Fail<string>(new ${failure}.InvalidInput(failed.Failure));`,
+    `return ${name(pascal(operation.name))}(inputValue.Value)`,
     `.Map(outcome => ${outcomeSwitch(operation, false, "outcome", "Ipc")})`,
     ".Recover(failure => failure switch {",
     `${failure}.InvalidInput invalid => fx.Fail<string>(invalid),`,

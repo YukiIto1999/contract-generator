@@ -43,12 +43,12 @@ export function cancellationScenarios(
     [
       "a host deadline that expires while running",
       call("zzz", { deadlineAfterMs: 50 }),
-      canceled("deadline"),
+      { exit: "transport", reason: "deadline" },
     ],
     [
       "a host deadline that expired before the call",
       call("ok", { deadline: past }),
-      canceled("deadline"),
+      { exit: "transport", reason: "deadline" },
     ],
     [
       "parent cancellation is reported ahead of an expired deadline",
@@ -56,7 +56,7 @@ export function cancellationScenarios(
       canceled("parent"),
     ],
     [
-      "a distant deadline adds no timeout of its own",
+      "a distant deadline preserves the completed result",
       call("zzz", { deadlineAfterMs: 600_000 }),
       completed,
     ],

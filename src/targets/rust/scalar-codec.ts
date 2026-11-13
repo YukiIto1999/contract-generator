@@ -5,7 +5,7 @@ import { exactNumeric } from "./storage.js";
 export interface ScalarCodec {
   /** Expression yielding the storage Option from `value`, `encoding`, `path` and `state` */
   readonly decode: string;
-  /** Expression yielding the wire token from the borrowed storage `value` and `encoding` */
+  /** Statements writing borrowed storage through `writer` under its wire encoding */
   readonly encode: string;
   /** Whether the wire representation depends on the selected encoding */
   readonly encodingAware: boolean;
@@ -14,28 +14,28 @@ export interface ScalarCodec {
 /** Textual scalars share one codec because their wire token is always a JSON string */
 const textual: ScalarCodec = {
   decode: "text(value, path, state)",
-  encode: "Value::String(value.clone())",
+  encode: "writer.string(value);",
   encodingAware: false,
 };
 
 /** Numbers retained as exact tokens in either representation */
 const exactToken: ScalarCodec = {
   decode: `number(value, encoding == "string", path, state).map(ExactNumber)`,
-  encode: `if encoding == "string" { Value::String(value.as_str().into()) } else { Value::Number(value.0.clone()) }`,
+  encode: `if encoding == "string" { writer.string(value.as_str()); } else { writer.number(value.as_str()); }`,
   encodingAware: true,
 };
 
 /** Boolean token or its string spelling */
 const boolean: ScalarCodec = {
-  decode: `if encoding == "string" { text(value, path, state).and_then(|value| match value.as_str() { "true" => Some(true), "false" => Some(false), _ => { state.reject(path, "format"); None } }) } else { match value { Value::Bool(value) => Some(value), other => { state.reject(path, if other.is_null() { "null" } else { "type" }); None } } }`,
-  encode: `if encoding == "string" { Value::String(value.to_string()) } else { Value::Bool(*value) }`,
+  decode: `if encoding == "string" { text(value, path, state).and_then(|value| match value.as_str() { "true" => Some(true), "false" => Some(false), _ => { state.reject(path, "format"); None } }) } else { match value { _JsonNode::Bool(value) => Some(value), other => { state.reject(path, if other.is_null() { "null" } else { "type" }); None } } }`,
+  encode: `if encoding == "string" { writer.string(if *value { "true" } else { "false" }); } else { writer.boolean(*value); }`,
   encodingAware: true,
 };
 
 /** Binary token in the binding-local base64 alphabet */
 const bytes: ScalarCodec = {
   decode: `text(value, path, state).and_then(|value| match base64_engine(encoding).decode(&value) { Ok(value) => Some(bytes::Bytes::from(value)), Err(_) => { state.reject(path, "format"); None } })`,
-  encode: "Value::String(base64_engine(encoding).encode(value))",
+  encode: "writer.string(&base64_engine(encoding).encode(value));",
   encodingAware: true,
 };
 
@@ -48,7 +48,7 @@ function integer(type: ScalarType): ScalarCodec {
   const narrow = type.scalar === "int32" ? ".and_then(|number| i32::try_from(number).ok())" : "";
   return {
     decode: `number(value, encoding == "string", path, state).and_then(|number| { let value = number.${parse}().or_else(|| integer_token(&number)?.parse().ok())${narrow}; if value.is_none() { state.reject(path, "type"); } value })`,
-    encode: `if encoding == "string" { Value::String(value.to_string()) } else { Value::Number(Number::from(*value)) }`,
+    encode: `let text = value.to_string(); if encoding == "string" { writer.string(&text); } else { writer.number(&text); }`,
     encodingAware: true,
   };
 }
@@ -63,7 +63,7 @@ function float(type: ScalarType): ScalarCodec {
   const widen = single ? "f64::from(*value)" : "*value";
   return {
     decode: `number(value, encoding == "string", path, state).and_then(|number| { let value = number.as_f64()${narrow}; if value.is_none() { state.reject(path, "type"); } value })`,
-    encode: `if encoding == "string" { Value::String(value.to_string()) } else { finite_number(${widen}) }`,
+    encode: `if encoding == "string" { writer.string(&value.to_string()); } else { match Number::from_f64(${widen}) { Some(number) => writer.number(number.as_str()), None => panic!("a non-finite float has no JSON number") } }`,
     encodingAware: true,
   };
 }

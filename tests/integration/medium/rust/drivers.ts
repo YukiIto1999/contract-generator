@@ -127,6 +127,7 @@ export function provider(native: Native, reply: string): Promise<Peer> {
  * @param reply - Raw JSON adapter reply configuration
  * @param commands - Raw JSON command lines
  * @returns Parsed result lines of the generated IPC dispatcher
+ * @throws Error when the IPC provider ends abnormally
  */
 export function ipcLines(
   native: Native,
@@ -139,6 +140,10 @@ export function ipcLines(
     input: `${commands.join("\n")}\n`,
     timeout: 60_000,
   });
+  if (result.status !== 0)
+    throw new Error(
+      `IPC provider ended with ${result.status} (${result.signal}): ${result.stderr.slice(-2000)}`,
+    );
   return result.stdout
     .split("\n")
     .filter((line) => line !== "")

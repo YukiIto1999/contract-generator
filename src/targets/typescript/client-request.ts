@@ -111,7 +111,7 @@ export function requestSource(
     indent(
       lines(
         `const accepted = C.${input.name}.create(input);`,
-        'if (accepted.isErr()) throw new C.ContractDefect("Invalid client input", accepted.error);',
+        'if (accepted.isErr()) throw new C.ContractDefect("Invalid client input", accepted.error.violations);',
         `const encoded = C.${input.name}.toWire(accepted.value.value, "http");`,
         'if (encoded.isErr()) throw new C.ContractDefect("Invalid request input", encoded.error);',
         "const wire = encoded.value as Record<string, unknown>;",

@@ -17,6 +17,7 @@ export function codecShell(
   create: string,
 ): string {
   const t = c.type(node.id);
+  const composite = node.kind === "object" || node.kind === "array" || node.kind === "union";
   return lines(
     doc(`Validated construction and wire boundary of ${node.name}`),
     `public static class ${name(node.name + "Codec")} {`,
@@ -36,9 +37,20 @@ export function codecShell(
     doc("Validated JSON output", ["value", "binding"], "JSON text or positioned violations"),
     `public static Result<string, ContractFailure> Encode(${t} value, string binding = "http") {`,
     `var c = new ReadContext(); Check(value, c, "");`,
-    `if (!c.IsValid) return new Result<string, ContractFailure>.Failed(c.Failure);`,
-    `return new Result<string, ContractFailure>.Succeeded(Wire.Encode(value, Write, binding));`,
+    `if (!c.IsValid) return Result.Failed(c.Failure);`,
+    `return Result.Succeeded(Wire.Encode(value, Write, binding));`,
     "}",
+    composite &&
+      lines(
+        doc(
+          "Stack-safe typed JSON acceptance",
+          ["element", "c", "path", "binding", "encoding"],
+          "Completed candidate",
+        ),
+        `internal static ${t} Read(JsonElement element, ReadContext c, Wire.Path path, string binding, string? encoding) => Wire.ReadFrames<${t}>((pending, complete) => ReadInto(element, c, path, binding, encoding, pending, complete));`,
+        doc("Stack-safe typed JSON output", ["writer", "value", "binding", "encoding"]),
+        `internal static void Write(Utf8JsonWriter writer, ${t} value, string binding, string? encoding) => Wire.WriteFrames(pending => WriteInto(writer, value, binding, encoding, pending));`,
+      ),
     members,
     "}",
   );

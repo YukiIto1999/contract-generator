@@ -1,9 +1,8 @@
 import type { HttpBinding } from "../../model/binding-model.js";
-import type { Field, ObjectType, Operation } from "../../model/contract-model.js";
+import type { Operation } from "../../model/contract-model.js";
 import { node, type RustContext } from "./context.js";
-import { parameterValue } from "./http-parameters.js";
 import { essenceOf, rawBytes } from "./media.js";
-import { key, quote, snake, stem } from "./naming.js";
+import { quote, snake, stem } from "./naming.js";
 
 /** Shape of one HTTP provider function derived from its binding */
 interface HttpPlan {
@@ -11,12 +10,6 @@ interface HttpPlan {
   readonly op: string;
   /** Complete HTTP interpretation */
   readonly binding: HttpBinding;
-  /** Operation input object */
-  readonly input: ObjectType;
-  /** Body parameter member, when the body carries one parameter */
-  readonly bodyField: Field | undefined;
-  /** Whether the body parameter is raw bytes */
-  readonly raw: boolean;
 }
 
 /** Whether the binding places a parameter at a location
@@ -46,46 +39,22 @@ function requestHead(plan: HttpPlan): string {
     ${media}`;
 }
 
-/** Parameter object assembly from the body and every placement
- * @param ctx - Rendering context
+/** Native nonbody text extraction for the types-crate projection
  * @param plan - HTTP plan
- * @returns Rust statements binding the mutable `parameters` object and `placement_diagnostics`
+ * @param operation - Canonical operation
+ * @returns Typed text placements
  */
-function assembly(ctx: RustContext, plan: HttpPlan): string {
-  const { binding, input, bodyField } = plan;
-  const mutated = binding.parameters.length > 0 || (bodyField !== undefined && !plan.raw);
-  const init =
-    binding.body.kind === "parameters"
-      ? `let ${mutated ? "mut " : ""}parameters = if bytes.is_empty() { serde_json::Map::new() } else { match std::str::from_utf8(&bytes).ok().and_then(|text| parse_json(text).ok()) { Some(Value::Object(value)) => value, _ => return Err(ProviderFailure::InvalidInput(invalid_json())) } };`
-      : `let ${mutated ? "mut " : ""}parameters = serde_json::Map::new();`;
-  const shadowed =
-    binding.body.kind === "parameters"
-      ? binding.parameters.map((mapping) => {
-          const field = input.fields.find((candidate) => candidate.name === mapping.parameter);
-          const wire = field?.wireName ?? mapping.wireName;
-          return `if parameters.remove(${quote(wire)}).is_some() { placement_diagnostics.push(Diagnostic { path: String::new(), key: ${quote(wire)}.into() }); }`;
-        })
-      : [];
-  const body =
-    bodyField !== undefined && !plan.raw
-      ? `if !bytes.is_empty() { parameters.insert(${quote(bodyField.wireName)}.into(), std::str::from_utf8(&bytes).ok().and_then(|text| parse_json(text).ok()).ok_or_else(|| ProviderFailure::InvalidInput(invalid_json()))?); }`
-      : "";
-  const inserts = binding.parameters.map((mapping) => {
-    const field = input.fields.find((candidate) => candidate.name === mapping.parameter);
-    if (field === undefined) return "";
+function assembly(plan: HttpPlan, operation: Operation): string {
+  const inserts = plan.binding.parameters.map((mapping) => {
     const source =
       mapping.location === "path"
         ? `path.remove(${quote(mapping.wireName)})`
         : mapping.location === "query"
           ? `query.remove(${quote(mapping.wireName)})`
           : `parts.headers.get(${quote(mapping.wireName)}).map(|value| value.to_str().map(str::to_owned)).transpose().map_err(|_| ProviderFailure::InvalidInput(invalid_parameter()))?`;
-    return `if let Some(text) = ${source} { parameters.insert(${quote(field.wireName)}.into(), ${parameterValue(ctx, field)}); }`;
+    return `${snake(mapping.parameter)}: ${source},`;
   });
-  return `${init}
-    let mut placement_diagnostics = Vec::new();
-    ${shadowed.join("\n")}
-    ${body}
-    ${inserts.join("\n")}`;
+  return `let placements = ${stem(operation)}HttpPlacements { ${inserts.join("\n")} };`;
 }
 
 /** Declared response arm of one handler result
@@ -105,7 +74,7 @@ function responseArms(ctx: RustContext, plan: HttpPlan, operation: Operation): s
         ? "axum::body::Body::empty()"
         : rawBytes(ctx, outcome.type, mapping.mediaType)
           ? `axum::body::Body::from(into_${plan.op}_${out}_bytes(value))`
-          : `axum::body::Body::from(encode_${plan.op}_${out}(&value, Binding::Http).to_string())`;
+          : `axum::body::Body::from(encode_${plan.op}_${out}(&value, Binding::Http))`;
     const headers = [
       ...(mapping.mediaType === undefined ? [] : [["content-type", mapping.mediaType]]),
       ...Object.entries(mapping.headers),
@@ -128,14 +97,7 @@ function planOf(ctx: RustContext, operation: Operation): HttpPlan | undefined {
   const binding = operation.http;
   const input = node(ctx, operation.input);
   if (binding === undefined || input.kind !== "object") return undefined;
-  const bodyField =
-    binding.body.kind === "parameter"
-      ? input.fields.find(
-          (field) => binding.body.kind === "parameter" && field.name === binding.body.parameter,
-        )
-      : undefined;
-  const raw = bodyField !== undefined && rawBytes(ctx, bodyField.type, binding.requestMediaType);
-  return { op: snake(operation.name), binding, input, bodyField, raw };
+  return { op: snake(operation.name), binding };
 }
 
 /** Actual HTTP provider request completion and dispatch
@@ -146,9 +108,6 @@ function planOf(ctx: RustContext, operation: Operation): HttpPlan | undefined {
 export function renderHttp(ctx: RustContext, operation: Operation): string {
   const plan = planOf(ctx, operation);
   if (plan === undefined) return "";
-  const decode = plan.raw
-    ? `decode_${plan.op}_http_binary(Value::Object(parameters), has_body.then_some(bytes))`
-    : `decode_${key(plan.input)}_value(Value::Object(parameters), Binding::Http)`;
   return `
 /// Actual HTTP provider request completion and dispatch
 ///
@@ -163,10 +122,8 @@ pub async fn ${plan.op}_http<H: Handler>(handler: &H, request: axum::http::Reque
     if token.is_cancelled() { return Err(ProviderFailure::Cancelled); }
     let (parts, body) = request.into_parts();
     ${requestHead(plan)}
-    ${assembly(ctx, plan)}
-    let accepted = ${decode};
-    let mut accepted = match accepted { Ok(value) => value, Err(mut failure) => { failure.diagnostics.append(&mut placement_diagnostics); return Err(ProviderFailure::InvalidInput(failure)); } };
-    accepted.diagnostics.append(&mut placement_diagnostics);
+    ${assembly(plan, operation)}
+    let accepted = decode_${plan.op}_http_request(${plan.binding.body.kind === "none" ? "None" : "has_body.then_some(bytes)"}, placements).map_err(ProviderFailure::InvalidInput)?;
     let outcome = handler.${plan.op}(accept_${plan.op}(accepted.value), token, deadline).await;
     let response = match outcome { ${responseArms(ctx, plan, operation)}
       Err(HandlerFailure::Cancelled) => return Err(ProviderFailure::Cancelled),

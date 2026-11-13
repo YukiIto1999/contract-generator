@@ -15,10 +15,15 @@ export function renderClient(c: CSharpContext): string {
     "public interface IIpcTransport {",
     doc(
       "Native cancellable command invocation",
-      ["command", "parameters", "deadline"],
+      [
+        "command",
+        "parameters",
+        "deadline",
+        ["cancellationToken", "Runtime-owned cancellation notification"],
+      ],
       "Resolved JSON envelope or expected communication failure",
     ),
-    "Effect<NoRequirements, CommunicationFailure, string> Invoke(string command, string parameters, DateTimeOffset? deadline);",
+    "ValueTask<Result<string, CommunicationFailure>> Invoke(string command, string parameters, global::EffectSystem.Domain.Deadline deadline, CancellationToken cancellationToken);",
     "}",
     doc("Injected client communication requirements"),
     "public interface IClientRequirements : IEffectRequirements {",
@@ -40,7 +45,7 @@ export function renderClient(c: CSharpContext): string {
     doc("Caller-visible native request deadline metadata", [], undefined, {
       value: "Option key that carries the host deadline on each request",
     }),
-    `public static readonly HttpRequestOptionsKey<DateTimeOffset?> DeadlineOption = new("ContractDeadline");`,
+    `public static readonly HttpRequestOptionsKey<global::EffectSystem.Domain.Deadline> DeadlineOption = new("ContractDeadline");`,
     ...c.model.operations.flatMap((operation) => [
       operation.http ? renderHttpClient(c, operation) : "",
       operation.ipc ? renderIpcClient(c, operation) : "",

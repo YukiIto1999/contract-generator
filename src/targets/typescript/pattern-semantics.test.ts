@@ -81,10 +81,16 @@ const cases: readonly Case[] = [
   { pattern: "^[\\uD83D\\uDE00]$", yes: ["\u{1f600}"], no: ["x"] },
 ];
 
+/** Rejection observations at the generated boundary */
+interface Rejection {
+  readonly violations: readonly { readonly path: string; readonly rule: string }[];
+  readonly diagnostics: readonly { readonly path: string; readonly key: string }[];
+}
+
 /** Acceptance result of a generated scalar codec */
 type Outcome = Result<
-  { readonly value: unknown },
-  readonly { readonly path: string; readonly rule: string }[]
+  { readonly value: unknown; readonly diagnostics: Rejection["diagnostics"] },
+  Rejection
 >;
 
 /** Public synchronous codec seams */
@@ -130,7 +136,11 @@ for (const [index, entry] of cases.entries()) {
     for (const value of entry.no)
       for (const result of outcomes(codec, value)) {
         expect(result.isErr(), JSON.stringify(value)).toBe(true);
-        if (result.isErr()) expect(result.error).toEqual([{ path: "", rule: "format" }]);
+        if (result.isErr())
+          expect(result.error).toEqual({
+            violations: [{ path: "", rule: "format" }],
+            diagnostics: [],
+          });
       }
   });
 }
@@ -157,6 +167,10 @@ test("codepoint length does not normalize or split supplementary characters", ()
   for (const result of outcomes(codec, "\u{1f600}")) expect(result.isOk()).toBe(true);
   for (const result of outcomes(codec, "e\u0301")) {
     expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error).toEqual([{ path: "", rule: "maxLength" }]);
+    if (result.isErr())
+      expect(result.error).toEqual({
+        violations: [{ path: "", rule: "maxLength" }],
+        diagnostics: [],
+      });
   }
 });

@@ -199,7 +199,7 @@ function utcTimestamp(text: string): string | undefined {
  * @param preserved - Retention of the exact numeric token instead of the calendar spelling
  * @returns Accepted spelling or the invalid sentinel
  */
-function readUnixSeconds(value: unknown, path: string, state: State, preserved: boolean): string | undefined {
+function readUnixSeconds(value: unknown, path: Path, state: State, preserved: boolean): string | undefined {
   const token = jsonNumberText(value);
   if (token === undefined) return invalid(state, path, "type");
   if (preserved) return unixRange(token) ? token : invalid(state, path, "format");

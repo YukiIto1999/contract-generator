@@ -1,47 +1,5 @@
-/** JSON syntax, private read boundary and codec construction shared by every declaration */
+/** Private read boundary and codec construction shared by every declaration */
 export const runtimeCodecSource = String.raw`/**
- * Error mapper for JSON syntax failures
- * @param cause - Caught value
- * @returns Syntax violations
- * @throws {@link Error} Value that is not a JSON syntax failure
- */
-function jsonSyntaxViolations(cause: unknown): readonly Violation[] {
-  if (cause instanceof SyntaxError) return syntaxViolations;
-  throw cause;
-}
-
-/**
- * Error mapper for malformed UTF-8
- * @param cause - Caught value
- * @returns Syntax violations
- * @throws {@link Error} Value that is not a decoding failure
- */
-function utf8Violations(cause: unknown): readonly Violation[] {
-  if (cause instanceof TypeError) return syntaxViolations;
-  throw cause;
-}
-
-/**
- * JSON syntax acceptance without custom parser
- * @param text - Complete JSON document
- * @returns Parser value or syntax violation
- */
-export function parseJson(text: string): Result<unknown, readonly Violation[]> {
-  return Result.wrap<unknown, unknown>(() => parse(text)).mapErr(jsonSyntaxViolations);
-}
-
-/**
- * JSON syntax acceptance for UTF-8 bytes
- * @param bytes - Complete JSON document encoding
- * @returns Parser value or syntax violation
- */
-export function parseJsonBytes(bytes: Uint8Array): Result<unknown, readonly Violation[]> {
-  return Result.wrap<string, unknown>(() => new TextDecoder("utf-8", { fatal: true }).decode(bytes))
-    .mapErr(utf8Violations)
-    .andThen(parseJson);
-}
-
-/**
  * Plain JSON object acceptance
  * @param value - Parsed JSON value
  * @returns The object or a shape violation
@@ -51,17 +9,13 @@ export function jsonObject(value: unknown): Result<Record<string, unknown>, read
 }
 
 /**
- * Exact JSON document serialization
- * @param value - Completed binding representation
- * @returns Complete JSON document
- * @throws {@link ContractDefect} Representation without a JSON document
+ * Boundary rejection without member observations
+ * @param violations - Syntax or shape failures
+ * @returns Immutable complete rejection
  */
-export function stringifyJson(value: unknown): string {
-  const text = stringify(value);
-  if (text === undefined) throw new ContractDefect("Missing JSON value");
-  return text;
+function rejection(violations: readonly Violation[]): BoundaryRejection {
+  return Object.freeze({ violations, diagnostics: Object.freeze([]) });
 }
-
 /**
  * Private read boundary without partially accepted values
  * @typeParam T - Completed declaration
@@ -71,11 +25,14 @@ export function stringifyJson(value: unknown): string {
  * @param reader - Specialized declaration reader
  * @returns Entire value and diagnostics or violations
  */
-function accept<T>(input: unknown, mode: Mode, defaults: boolean, reader: Reader<T>): Result<Accepted<T>, readonly Violation[]> {
-  if (input === undefined) return Err(absentViolations);
+function accept<T>(input: unknown, mode: Mode, defaults: boolean, reader: Reader<T>): Result<Accepted<T>, BoundaryRejection> {
+  if (input === undefined) return Err(rejection(absentViolations));
   const state: State = { defaults, violations: [], diagnostics: [], active: new WeakSet() };
-  const value = reader(input, "", state, mode);
-  if (state.violations.length > 0) return Err(Object.freeze(state.violations));
+  const value = finishRead(reader(input, undefined, state, mode));
+  if (state.violations.length > 0) return Err(Object.freeze({
+    violations: Object.freeze(state.violations),
+    diagnostics: Object.freeze(state.diagnostics),
+  }));
   return Ok(Object.freeze({ value: value as T, diagnostics: Object.freeze(state.diagnostics) }));
 }
 
@@ -88,13 +45,15 @@ function accept<T>(input: unknown, mode: Mode, defaults: boolean, reader: Reader
  */
 function codec<T>(reader: Reader<T>, writer: Writer<T>): Codec<T> {
   const toWire = (value: T, binding: WireBinding = "http"): Result<unknown, readonly Violation[]> =>
-    accept(value, "local", false, reader).map((accepted) => writer(accepted.value, binding));
+    accept(value, "local", false, reader).mapErr((error) => error.violations).map((accepted) => wireGraph(writer(accepted.value, binding)));
   return Object.freeze({
     create: (input: unknown) => accept(input, "local", false, reader),
     fromWire: (input: unknown, binding: WireBinding = "http") => accept(input, binding, false, reader),
-    decode: (text: string, binding: WireBinding = "http") => parseJson(text).andThen((input) => accept(input, binding, false, reader)),
+    decode: (text: string, binding: WireBinding = "http") => parseJson(text).mapErr(rejection).andThen((input) => accept(input, binding, false, reader)),
     toWire,
-    encode: (value: T, binding: WireBinding = "http") => toWire(value, binding).map(stringifyJson),
+    encode: (value: T, binding: WireBinding = "http") => accept(value, "local", false, reader)
+      .mapErr((error) => error.violations)
+      .map((accepted) => wireText(writer(accepted.value, binding))),
   });
 }
 
@@ -103,17 +62,17 @@ function codec<T>(reader: Reader<T>, writer: Writer<T>): Codec<T> {
  * @param input - Candidate payload
  * @returns Absent payload or a shape violation
  */
-function acceptNoValue(input: unknown): Result<Accepted<undefined>, readonly Violation[]> {
-  if (input !== undefined) return Err(shapeViolations);
+function acceptNoValue(input: unknown): Result<Accepted<undefined>, BoundaryRejection> {
+  if (input !== undefined) return Err(rejection(shapeViolations));
   return Ok(Object.freeze({ value: undefined, diagnostics: Object.freeze([]) }));
 }
 
 /** Codec of a result without a payload: only the absent value is accepted and it has no JSON document */
 export const noValue: Codec<undefined> = Object.freeze({
   create: acceptNoValue,
-  decode: (text: string) => parseJson(text).andThen(acceptNoValue),
+  decode: (text: string) => parseJson(text).mapErr(rejection).andThen(acceptNoValue),
   fromWire: acceptNoValue,
   encode: () => Err(shapeViolations),
-  toWire: (value: undefined) => acceptNoValue(value).map(() => undefined),
+  toWire: (value: undefined) => acceptNoValue(value).mapErr((error) => error.violations).map(() => undefined),
 });
 `;

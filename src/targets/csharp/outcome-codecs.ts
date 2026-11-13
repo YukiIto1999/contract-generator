@@ -1,8 +1,9 @@
 import type { Operation, Outcome } from "../../model/contract-model.js";
+import { decodeOutcome } from "./client-outcome.js";
 import { useCheck, type UseCheck } from "./checks.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
-import { lines, name, pascal } from "./naming.js";
+import { lines, name, pascal, quote } from "./naming.js";
 import { readUse } from "./use-codec.js";
 
 /** Identifier of an operation-scoped declaration
@@ -80,18 +81,69 @@ function outputMembers(c: CSharpContext, operation: Operation, outcome: Outcome)
     ),
     `public static Result<Accepted<${family}>, ContractFailure> Decode${outcome.name}Result(string json, string binding = "http") {`,
     `var decoded = Decode${outcome.name}(json, binding);`,
-    `if (decoded is Result<Accepted<${t}>, ContractFailure>.Failed failed) return new Result<Accepted<${family}>, ContractFailure>.Failed(failed.Failure);`,
-    `var accepted = ((Result<Accepted<${t}>, ContractFailure>.Succeeded)decoded).Value;`,
-    `return new Result<Accepted<${family}>, ContractFailure>.Succeeded(new(${family}.${name(pascal(outcome.name))}.Complete(accepted.Value), accepted.Diagnostics));`,
+    `if (decoded.IsFailed(out var failed, out var accepted)) return failed;`,
+    `return Result.Succeeded<Accepted<${family}>>(new(${family}.${name(pascal(outcome.name))}.Complete(accepted.Value), accepted.Diagnostics));`,
     "}",
     doc("Outcome payload output guard", ["value", "binding"], "JSON text or positioned violations"),
     `public static Result<string, ContractFailure> Encode${outcome.name}(${t} value, string binding = "http") {`,
-    use.nullable &&
-      `if (value is null) return new Result<string, ContractFailure>.Succeeded("null");`,
+    use.nullable && `if (value is null) return Result.Succeeded("null");`,
     `var checkedValue = Validate${outcome.name}(value);`,
-    `if (checkedValue is Result<Accepted<${t}>, ContractFailure>.Failed failed) return new Result<string, ContractFailure>.Failed(failed.Failure);`,
-    `return new Result<string, ContractFailure>.Succeeded(Wire.Encode<${t}>(value, (writer, value, binding, encoding) => { ${c.codec(use.id)}.Write(writer, ${c.unwrap(use, "value")}, binding, ${c.encoding(use)}); }, binding));`,
+    `if (checkedValue.IsFailed(out var failed, out _)) return failed;`,
+    `return Result.Succeeded(Wire.Encode<${t}>(value, (writer, value, binding, encoding) => { ${c.codec(use.id)}.Write(writer, ${c.unwrap(use, "value")}, binding, ${c.encoding(use)}); }, binding));`,
     "}",
+  );
+}
+
+/** Operation-specific IPC envelope boundaries owned by the types assembly
+ * @param operation - Operation with IPC bindings
+ * @returns Typed envelope decoder and outcome encoder overloads
+ */
+function ipcMembers(operation: Operation): string {
+  if (!operation.ipc) return "";
+  return lines(
+    doc("Strict IPC response envelope acceptance", ["json"], "Selected typed operation result", {
+      throws: [["InvalidOperationException", "An envelope that breaks the operation contract"]],
+    }),
+    `public static Result<${opName(operation, "Success")}, ${opName(operation, "Failure")}> DecodeIpcEnvelope(string json) {`,
+    "try {",
+    "using var document = Wire.Parse(json);",
+    "var root = document.RootElement;",
+    `if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("tag", out var tag) || tag.ValueKind != JsonValueKind.String) throw new InvalidOperationException("Invalid IPC response envelope");`,
+    "switch (tag.GetString()) {",
+    ...operation.ipc.results.map((mapping) => {
+      const outcome = operation.outcomes.find((o) => o.name === mapping.outcome)!;
+      return lines(
+        `case ${quote(mapping.tag)}: {`,
+        outcome.type
+          ? `if (!root.TryGetProperty("body", out var body)) throw new InvalidOperationException("Missing IPC payload");`
+          : `if (root.TryGetProperty("body", out _)) throw new InvalidOperationException("Void IPC result has a body");`,
+        decodeOutcome(operation, outcome, "body.GetRawText()", "ipc", false),
+        "}",
+      );
+    }),
+    `default: throw new InvalidOperationException("Unknown IPC result tag");`,
+    "}",
+    `} catch (JsonException exception) { throw new InvalidOperationException("Invalid IPC response JSON", exception); }`,
+    "}",
+    ...operation.ipc.results.map((mapping) => {
+      const outcome = operation.outcomes.find((o) => o.name === mapping.outcome)!;
+      return lines(
+        doc(
+          "Validated typed IPC response envelope output",
+          ["value"],
+          "Envelope JSON or positioned violations",
+        ),
+        `public static Result<string, ContractFailure> EncodeIpcEnvelope(${familyName(operation, outcome)}.${name(pascal(outcome.name))} value) {`,
+        outcome.type && `var encoded = Encode${outcome.name}(value.Value, "ipc");`,
+        outcome.type && "if (encoded.IsFailed(out var failed, out var body)) return failed;",
+        "return Result.Succeeded(Wire.Encode(value, (writer, value, binding, encoding) => {",
+        `writer.WriteStartObject(); writer.WriteString("tag", ${quote(mapping.tag)});`,
+        outcome.type &&
+          'writer.WritePropertyName("body"); writer.WriteRawValue(body, skipInputValidation: true);',
+        'writer.WriteEndObject(); }, "ipc"));',
+        "}",
+      );
+    }),
   );
 }
 
@@ -104,6 +156,7 @@ export function renderOutcomeCodecs(c: CSharpContext, operation: Operation): str
   return lines(
     doc(`Binding-specific payload boundaries of the ${operation.name} outcomes`),
     `public static class ${opName(operation, "OutcomeCodecs")} {`,
+    ipcMembers(operation),
     ...operation.outcomes
       .filter((outcome) => outcome.type)
       .map((outcome) => lines(acceptMembers(c, outcome), outputMembers(c, operation, outcome))),
