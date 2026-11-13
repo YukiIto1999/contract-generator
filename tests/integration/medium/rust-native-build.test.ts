@@ -1,18 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
-import {
-  build,
-  cargo,
-  cargoVersion,
-  cleanCargo,
-  compilerMessages,
-  dispose,
-  type Native,
-} from "./rust/native.js";
+import { build, cargo, cleanCargo, compilerMessages, dispose, type Native } from "./rust/native.js";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 3_600_000 });
-const native = test.skipIf(cargoVersion === undefined);
+const native = test;
 const names = ["sample", "wide", "guarantees"] as const;
 const built: Native[] = [];
 
@@ -27,7 +19,6 @@ function sample(): Native {
 }
 
 beforeAll(async () => {
-  if (cargoVersion === undefined) return;
   for (const name of names) built.push(await build(name, true));
 });
 afterAll(async () => {

@@ -6,6 +6,7 @@ coverage/
 work/
 .typescript-contract-*/
 .typescript-numeric-*/
+**/artifacts/
 **/bin/
 **/obj/
 **/target/

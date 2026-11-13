@@ -1,6 +1,6 @@
 import { NoTarget } from "@typespec/compiler";
 import { expect, test } from "vite-plus/test";
-import { $lib } from "./library.js";
+import { $lib } from "../../library.js";
 import { compileSource } from "./profile-source.fixture.js";
 
 test("the publication cleanup diagnostic is a warning that lists the remaining paths", async () => {

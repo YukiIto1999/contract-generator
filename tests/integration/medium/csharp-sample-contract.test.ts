@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect } from "vite-plus/test";
 import { sampleSource } from "./csharp-contract.js";
@@ -19,6 +19,20 @@ nativeTest(
     expect(
       generatedDiagnostics(sample.build("CodecDriver.csproj")).map((diagnostic) => diagnostic.text),
     ).toEqual([]);
+  },
+);
+
+nativeTest(
+  "writes the referenced TypeModeling build and restore output under its own artifacts root",
+  async () => {
+    const { artifactsRoot } = sample.fixture();
+    for (const owned of [
+      "bin/TypeModeling/debug/TypeModeling.dll",
+      "bin/Contract.Types/debug/Contract.Types.dll",
+      "obj/TypeModeling/project.assets.json",
+      "obj/CodecDriver/project.assets.json",
+    ])
+      await expect(access(join(artifactsRoot, owned)), owned).resolves.toBeUndefined();
   },
 );
 

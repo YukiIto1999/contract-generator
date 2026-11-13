@@ -53,6 +53,7 @@ npm exec vp -- test run src/targets/rust tests/integration/medium/rust-
 Each test file materializes the contracts it needs into a temporary directory, builds with the existing Cargo cache via `--offline` and removes the temporary files and processes it owns. Every Cargo build uses `--message-format=json`; any warning from a generated or fixture crate fails the suite. `rust-native-build.test.ts` builds each generated crate alone, compares `cargo tree` against the dependency contract, reports each public constructor regression as its own test and runs the compile-only probes.
 
 A missing or unsupported rustc/Cargo toolchain and a missing cache dependency are prerequisite failures, never skipped tests.
+Temporary builds remove the host checkout's managed `CARGO_BUILD_BUILD_DIR` rather than sharing its intermediate files.
 
 Environment switches, all optional:
 

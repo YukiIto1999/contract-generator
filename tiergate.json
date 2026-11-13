@@ -1,6 +1,11 @@
 {
   "version": 1,
   "verify": {
-    "seconds": 900
+    "seconds": 300,
+    "feedbackTargetSeconds": 120
+  },
+  "verify-push": {
+    "seconds": 1200,
+    "feedbackTargetSeconds": 600
   }
 }

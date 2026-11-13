@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { acceptedInputs, call, drive, provider } from "./rust/drivers.js";
-import { build, cargoVersion, dispose, type Native } from "./rust/native.js";
+import { build, dispose, type Native } from "./rust/native.js";
 import { peer, respond, stopChildren } from "./rust/protocol.js";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 1_800_000 });
-const native = test.skipIf(cargoVersion === undefined);
+const native = test;
 let built: Native;
 
 beforeAll(async () => {
-  if (cargoVersion !== undefined) built = await build("wide");
+  built = await build("wide");
 });
 afterAll(async () => {
   await stopChildren();

@@ -10,14 +10,11 @@ import {
   type NativeBuild,
 } from "./csharp-toolchain.js";
 
-/** Toolchain verdict evaluated once so an unavailable toolchain is reported rather than silently passing */
+/** Required native toolchain verdict for every C# acceptance suite */
 const toolchain = detectCSharpToolchain();
-if (!toolchain.available)
-  console.warn(
-    `[csharp-native] NOT RUN: the generated C# was not compiled or executed because ${toolchain.reason}`,
-  );
+if (!toolchain.available) throw new Error(`[csharp-native] ${toolchain.reason}`);
 
-/** Test that runs only against the pinned native toolchain
+/** Test against the required native toolchain
  * @param name - Behavior under test
  * @param body - Test body
  * @param timeout - Ceiling in milliseconds; builds and processes run long on a shared workstation
@@ -27,7 +24,7 @@ export function nativeTest(
   body: () => void | Promise<void>,
   timeout = 600_000,
 ): void {
-  test.skipIf(!toolchain.available)(name, body, timeout);
+  test(name, body, timeout);
 }
 
 /** Contract rendered and built once for the tests of one file */
@@ -60,10 +57,9 @@ export function useContract(
   text?: string,
 ): ContractSuite {
   let state: BuiltContract | undefined;
-  if (toolchain.available)
-    beforeAll(async () => {
-      state = await buildContract(source, namespace, projects, text);
-    }, 1_200_000);
+  beforeAll(async () => {
+    state = await buildContract(source, namespace, projects, text);
+  }, 1_200_000);
   afterAll(async () => {
     await after();
     if (state) await rm(state.fixture.root, { recursive: true, force: true });
@@ -86,10 +82,9 @@ export function useContract(
  */
 export function useServer(suite: ContractSuite): () => HttpServer {
   let server: HttpServer | undefined;
-  if (toolchain.available)
-    beforeAll(async () => {
-      server = await startHttpServer(suite.driver("OperationDriver"));
-    }, 600_000);
+  beforeAll(async () => {
+    server = await startHttpServer(suite.driver("OperationDriver"));
+  }, 600_000);
   afterAll(async () => {
     if (server) await server.stop();
   });

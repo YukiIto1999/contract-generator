@@ -17,7 +17,6 @@ import {
 import { decode } from "./rust/drivers.js";
 import {
   cargo,
-  cargoVersion,
   cleanCargo,
   dispose,
   fetchDependencies,
@@ -28,7 +27,7 @@ import {
 } from "./rust/native.js";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 3_600_000 });
-const native = test.skipIf(cargoVersion === undefined);
+const native = test;
 const prefix = "sourcedata";
 const types = ["--manifest-path", "rust/Cargo.toml", "--package", `${prefix}-types`];
 let built: Checkout | undefined;
@@ -43,7 +42,6 @@ function checkout(): Checkout {
 }
 
 beforeAll(async () => {
-  if (cargoVersion === undefined) return;
   const source = "tests/fixtures/rust/source-data/main.tsp";
   const model = await modelFrom(source, "SourceData", hostileContract("../../../../lib/main.tsp"));
   built = await writeCheckout(

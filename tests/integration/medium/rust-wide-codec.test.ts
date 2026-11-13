@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { decode } from "./rust/drivers.js";
-import { build, cargoVersion, dispose, type Native } from "./rust/native.js";
+import { build, dispose, type Native } from "./rust/native.js";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 1_800_000 });
-const native = test.skipIf(cargoVersion === undefined);
+const native = test;
 let built: Native;
 
 beforeAll(async () => {
-  if (cargoVersion !== undefined) built = await build("wide");
+  built = await build("wide");
 });
 afterAll(async () => {
   await dispose(built);

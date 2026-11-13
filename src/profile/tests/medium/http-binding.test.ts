@@ -1,6 +1,6 @@
 import { NoTarget, getSourceLocation } from "@typespec/compiler";
 import { expect, test } from "vite-plus/test";
-import { reportIssues } from "./compile-contract.js";
+import { reportIssues } from "../../compile-contract.js";
 import { codesFrom, httpSource, issuesFrom, modelFrom } from "./profile-source.fixture.js";
 
 test.each([

@@ -42,14 +42,36 @@ The dependency projects were built from the same checkouts and reported no diagn
 From the repository root inside `devenv shell`:
 
 ```sh
-npx vp test run src/targets/csharp tests/integration/medium/csharp
+npm run verify:push
 ```
 
-The suite renders the contracts through the real TypeSpec frontend, writes the generated files and a clean copy of this directory into a directory under `$TMPDIR`, runs the `dotnet build` commands below, drives the resulting assemblies, and removes the directory afterward.
+The C# acceptance is the `csharp` collection of that entry.
+Each test file renders its contract through the real TypeSpec frontend and writes the generated files and a clean copy of this directory into its own directory under `$TMPDIR`.
+It restores each project with `dotnet restore` and `--artifacts-path` set to that directory's `artifacts/`, then runs the `dotnet build --no-restore` commands below with the same option.
+The SDK's artifacts layout puts the `bin` and `obj` of every project in that build there, including the TypeModeling and EffectSystem source projects that the generated units reference, so concurrently running test files never write the same dependency output, restore assets or `deps.json`.
+The fixture's `Directory.Build.props` opts into the same layout with `UseArtifactsOutput`, which keeps projects of this directory apart and places a manual build under `tests/fixtures/csharp/artifacts/`.
+The suite then drives the resulting assemblies from `artifacts/bin/<project>/debug/` and removes the directory afterward.
 It builds with `--disable-build-servers`, so no MSBuild or compiler server is left running.
+Each suite passes its private `--artifacts-path` to every build, including referenced dependency projects. Fixture projects use the SDK artifacts layout rather than overriding `BaseOutputPath`; executable paths are `<artifacts>/bin/<project>/debug/<project>.dll`. Manual builds without that option use the fixture directory's `artifacts/` tree.
 It fails on any compiler diagnostic that is not located inside one of the pinned dependency checkouts.
-Without a runnable `dotnet` 10 or without both project-path variables the native suites are skipped, and a `[csharp-native] NOT RUN:` line names the missing prerequisite.
-A skipped suite is not a verification.
+Without a runnable `dotnet` 10, without both project-path variables, or without the package audit receipt the suite fails and names the missing prerequisite; it is never skipped.
+
+## Package audit
+
+The generated projects and these fixtures declare no `PackageReference`. The only packages of a build are those of the TypeModeling and EffectSystem source projects and of their analyzers, which restore the same packages in every test directory.
+The medium sandbox has no route to a NuGet source, so a restore inside it cannot obtain vulnerability data and would report `NU1900`.
+`npm run prepare:native` therefore owns the audit and runs outside the sandbox with network access; `npm run audit:native` repeats only the audit to refresh its receipt, and a release reruns it online before `npm run verify:push`.
+Both run the `Restore` target through `dotnet msbuild -target:Restore` for each of `TypeModelingProjectPath` and `EffectSystemProjectPath` into its own fresh artifacts directory (`-p:ArtifactsPath`, `RestoreForce`, `RestoreNoHttpCache`), because only `dotnet msbuild` documents the `-getProperty` and `-getResultOutputFile` switches that they need.
+The restore sets `NuGetAudit=true`, `NuGetAuditMode=all`, `NuGetAuditLevel=low` and `RestoreUseStaticGraphEvaluation=false`, makes `NU1900` to `NU1905` errors instead of warnings, and fails on a failed restore or on any such diagnostic in its output; nothing is suppressed.
+A restore with no diagnostic is not proof of an audit: with no `auditSources`, NuGet falls back to the package sources and stays silent when none of them publishes vulnerability data.
+So `-getProperty:RestoreProjectCount,RestoreProjectsAuditedCount,RestoreSkippedCount` with `-getResultOutputFile` writes the counts that NuGet 7 reports to a JSON file in the scratch directory, and the audit fails unless the file exists with all three counts, no project was skipped as up to date, every project of the graph was audited, and the number of counted projects equals the number that wrote `project.assets.json`.
+They also read the evaluated restore settings in every restored `obj/*/project.assets.json` and fail when the audit is disabled, its level is not `low`, its mode is not `all`, advisories are suppressed, or `NoWarn` lists an `NU1900` to `NU1905` code.
+On success they write `work/native-package-audit.json` with the audit time and the identity and SHA-512 of every restored package, and no feed, configuration or credential; the output they print is bounded, with URL userinfo, query strings and fragments removed.
+Each restore inside a test directory runs with `NuGetAudit=false`, then fails the test unless every package in its `obj/*/project.assets.json` appears in that receipt with the same SHA-512.
+Only these isolated duplicate restores opt out; the library and repository builds keep the default audit.
+A conditional or added package reference, a changed version or a different archive is therefore rejected rather than restored unaudited.
+The receipt is a point-in-time record of the advisories known at its audit time, not a claim that the packages are currently free of vulnerabilities; it does not expire, and rerunning the audit refreshes it.
+The C# evidence of `verify:push` includes the receipt, so a new audit or a missing receipt invalidates earlier C# results.
 
 ## Build inputs and manual commands
 

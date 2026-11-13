@@ -32,7 +32,7 @@ npm ci
 npm run build
 ```
 
-It requires Node 24.11 or later and `@typespec/compiler` 1.17.0.
+It requires Node 24.11 or later within 24.x, or Node 26 or later, and `@typespec/compiler` 1.17.0.
 
 ## Authoring a contract
 
@@ -288,6 +288,16 @@ Verify browser and Tauri compatibility in the target environment with the genera
 The IPC binding is a request and a response over a transport that the host supplies.
 Its fixtures include generic separate-process transports and a [real Tauri/Wry webview](./tests/fixtures/tauri/README.md) with generated TypeScript consumers and Rust provider dispatch.
 That desktop fixture targets Linux with GTK3 and WebKitGTK 4.1; it is not a claim of acceptance on Windows, macOS, or mobile.
+
+## Verification
+
+From the repository root, `npm run verify` checks a commit-sized unit: build, types, format and lint, module boundaries, Small tests, and local compiler and publication acceptance.
+Before pushing or preparing a release, run `npm run verify:push` in the prepared development environment.
+It reuses matching per-check evidence and runs the missing checks, including real generated TypeScript, C#, Rust, and WebView acceptance; missing required tools fail instead of skipping tests.
+Native C# preparation audits the dependency package graph online and records its package hashes for isolated acceptance; refresh this point-in-time audit with `npm run audit:native` before release verification.
+`npm test` rebuilds and runs every test collection through its size runner without evidence reuse.
+There is no separate `verify:full` alias for the same suite.
+[CONTRIBUTING](./CONTRIBUTING.md#検証) describes preparation, test sizes and their sandboxed runners, evidence invalidation, and resource limits.
 
 ## Architecture standard
 

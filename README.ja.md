@@ -32,7 +32,7 @@ npm ci
 npm run build
 ```
 
-Node 24.11 以降と `@typespec/compiler` 1.17.0 が要る。
+Node は 24.11 以降の 24 系か 26 以降を使い、`@typespec/compiler` は 1.17.0 を使う。
 
 ## 契約の記述
 
@@ -304,6 +304,17 @@ browser や Tauri の互換性は、生成物と必要な依存を組み込ん�
 IPC の binding は、host が供給する transport の上の要求と応答である。
 fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。
 desktop fixture の対象は GTK3 と WebKitGTK 4.1 を使う Linux であり、Windows、macOS、mobile での受入を示すものではない。
+
+## 検証
+
+リポジトリの root で `npm run verify` を実行すると、作業単位の build・型・format・lint・module 境界・Small の test と、local compiler・公開処理の受入を確認する。
+push と release の準備の前には、準備済みの開発環境で `npm run verify:push` を実行する。
+検査ごとの同じ入力の証跡を再利用し、不足する検査と生成 TypeScript・C#・Rust・実 WebView の受入を実行し、必要な tool がなければ skip ではなく失敗する。
+C# の依存準備では、オンラインで package の依存を監査し、隔離した受入で照合する hash を記録する。
+この記録は監査時点の情報であるため、release の検証前には `npm run audit:native` で更新する。
+`npm test` は build を作り直し、証跡を再利用せず全 test collection を size 別 runner で実行する。
+同じ一式を重複して実行する `verify:full` の別名は置かない。
+準備・test の size と sandbox 化した runner・証跡の失効・資源上限は、[CONTRIBUTING](./CONTRIBUTING.md#検証) に記載する。
 
 ## アーキテクチャの標準
 
