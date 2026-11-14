@@ -5,6 +5,8 @@ export interface InvalidInput {
   readonly kind: "invalid-input";
   /** Located contract rule failures without received values */
   readonly violations: readonly C.Violation[];
+  /** Unknown member locations without received values */
+  readonly diagnostics: readonly C.Diagnostic[];
 }
 
 /** Expected absence of an operation route or command */
@@ -27,10 +29,11 @@ interface ProviderParts<Env> {
 /**
  * Typed rejection of untrusted provider input
  * @param violations - Located contract rule failures
+ * @param diagnostics - Unknown member locations from rejected input
  * @returns Expected inbound failure without handler dispatch
  */
-function invalidInput(violations: readonly C.Violation[]): Err<InvalidInput> {
-  return Err({ kind: "invalid-input", violations });
+function invalidInput(violations: readonly C.Violation[], diagnostics: readonly C.Diagnostic[] = []): Err<InvalidInput> {
+  return Err({ kind: "invalid-input", violations, diagnostics });
 }
 
 /**
@@ -57,7 +60,7 @@ function wirePayload<T>(codec: C.Codec<T>, value: T, binding: C.WireBinding): un
  */
 function rawPayload(codec: C.Codec<C.ByteSequence>, value: C.ByteSequence): Uint8Array<ArrayBuffer> {
   const checked = codec.create(value);
-  if (checked.isErr()) throw new C.ContractDefect("Invalid handler output", checked.error);
+  if (checked.isErr()) throw new C.ContractDefect("Invalid handler output", checked.error.violations);
   return checked.value.value.toUint8Array();
 }
 
@@ -71,7 +74,7 @@ function rawPayload(codec: C.Codec<C.ByteSequence>, value: C.ByteSequence): Uint
  */
 function checkedPayload<T>(codec: C.Codec<T>, value: T): T {
   const checked = codec.create(value);
-  if (checked.isErr()) throw new C.ContractDefect("Invalid handler output", checked.error);
+  if (checked.isErr()) throw new C.ContractDefect("Invalid handler output", checked.error.violations);
   return checked.value.value;
 }
 `;

@@ -61,7 +61,7 @@ impl Host {
     /// Poisoned fixture state or invalid internally constructed receipt
     fn receipt(&self) -> types::Receipt {
         let effects = self.effects.lock().expect("fixture state lock");
-        accepted(types::decode_inspect_inspected(json!({"label": effects.label, "total": effects.total, "writes": effects.writes}), Binding::Ipc))
+        accepted(types::decode_inspect_inspected(&json!({"label": effects.label, "total": effects.total, "writes": effects.writes}).to_string(), Binding::Ipc))
     }
 }
 
@@ -91,7 +91,7 @@ impl provider::Handler for Host {
             effects.entered += 1;
         }
         if input.label() == "deny" {
-            return Err(HandlerFailure::Rejected(types::RecordRejection::Refused(accepted(types::decode_record_refused(json!({"code": "blocked"}), Binding::Ipc)))));
+            return Err(HandlerFailure::Rejected(types::RecordRejection::Refused(accepted(types::decode_record_refused("{\"code\":\"blocked\"}", Binding::Ipc)))));
         }
         if input.label() == "hold" {
             self.effects.lock().expect("fixture state lock").active += 1;
@@ -138,9 +138,8 @@ async fn contract_request(host: State<'_, Host>, command: String, parameters_jso
     if host.effects.lock().expect("fixture state lock").phase != Phase::Ready {
         return Err(json!({"kind": "unavailable"}));
     }
-    let parameters = types::parse_json(&parameters_json).map_err(|_| json!({"kind": "invalid-json"}))?;
-    match provider::dispatch_ipc(&*host, &command, parameters, &host.token, None).await {
-        Ok(value) => Ok(value.value.to_string()),
+    match provider::dispatch_ipc(&*host, &command, parameters_json, &host.token, None).await {
+        Ok(value) => Ok(value.value),
         Err(ProviderFailure::InvalidInput(failure)) => Err(json!({"kind": "invalid-input", "violations": failure.violations})),
         Err(ProviderFailure::UnknownOperation) => Err(json!({"kind": "not-found"})),
         Err(ProviderFailure::Communication) => Err(json!({"kind": "communication"})),

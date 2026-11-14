@@ -1,46 +1,35 @@
-import type { UnionType, Variant } from "../../model/contract-model.js";
-import { decodeUse, encodeUse } from "./codec-use.js";
+import type { UnionType } from "../../model/contract-model.js";
+import { encodeUse } from "./codec-use.js";
 import { publicCodec } from "./codec-public.js";
 import { node, type RustContext } from "./context.js";
 import { doc, key, quote, snake } from "./naming.js";
 import { useType } from "./storage.js";
+import { tupleVariant } from "./render-enum.js";
 
-/** Discriminator consistency check of one case inside the shared completion
+/** Inline exhaustive union of canonical immutable object handles
  * @param ctx - Generation context
  * @param type - Union declaration
- * @param variant - Union case
- * @returns Rust match arm, or an empty string when the payload carries no discriminator field
+ * @returns Rust declarations and immediate discriminator completion
  */
-function caseCheck(ctx: RustContext, type: UnionType, variant: Variant): string {
-  const payload = node(ctx, variant.type.id);
-  if (payload.kind !== "object") return "";
-  const field = payload.fields.find((candidate) => candidate.wireName === type.discriminator);
-  if (field === undefined) return "";
-  const encoded = encodeUse(ctx, field.type, `&payload.${snake(field.name)}`);
-  const expected = `Value::String(${quote(variant.tag)}.into())`;
-  return `${type.name}Case::${variant.name}(payload) => { let binding = Binding::Ipc; if ${encoded} != ${expected} { state.reject(&pointer(path, ${quote(type.discriminator)}), "variant"); } },`;
-}
-
-/** Public structs, constructor and accessors of a union
- * @param ctx - Generation context
- * @param type - Union declaration
- * @returns Rust declarations with the impl block
- */
-function declaration(ctx: RustContext, type: UnionType): string {
+export function renderUnion(ctx: RustContext, type: UnionType): string {
   const cases = type.variants
-    .map(
-      (variant) =>
-        `${doc("", `Payload for exact tag ${variant.tag}`)}\n${variant.name}(${useType(ctx, variant.type)}),`,
+    .map((variant) =>
+      tupleVariant(variant.name, `Payload for exact tag ${variant.tag}`, [
+        [useType(ctx, variant.type), "Canonical accepted payload"],
+      ]),
     )
     .join("\n");
   return `${doc(type.description, "Closed accepted discriminator-selected value")}
-#[derive(Debug, Clone, PartialEq)]
-pub struct ${type.name}(${type.name}Case);
+#[derive(Clone)]
+pub struct ${type.name}(
+/// Selected accepted union case
+${type.name}Case
+);
 /// Exhaustive accepted union cases
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub enum ${type.name}Case { ${cases} }
 impl ${type.name} {
-/// Discriminator-correct owned union construction through the shared completion
+/// Discriminator-correct owned construction without child graph revalidation
 ///
 /// - value: owned accepted payload case
 /// - Return: validated matching discriminator
@@ -48,7 +37,7 @@ impl ${type.name} {
 /// Payload discriminator inconsistent with selected case
 pub fn try_new(value: ${type.name}Case) -> Result<Accepted<Self>, ValidationFailure> {
     let mut state = State::default();
-    let value = _complete_${key(type)}("", &mut state, value);
+    let value = _complete_${key(type)}(0, &mut state, value);
     state.finish(value)
 }
 /// Shared exhaustive case view
@@ -61,82 +50,37 @@ pub fn as_case(&self) -> &${type.name}Case { &self.0 }
 /// - self: accepted union
 /// - Return: moved selected payload
 pub fn into_case(self) -> ${type.name}Case { self.0 }
-}`;
+}
+${renderUnionCompletion(ctx, type)}
+${publicCodec(type)}`;
 }
 
-/** Discriminator-first selection and shared completion of a union
- * @param ctx - Generation context
+/** Immediate selected-case discriminator validation
+ * @param ctx - Rendering context
  * @param type - Union declaration
- * @returns Rust private functions
+ * @returns Rust discriminator completion function
  */
-function codecFunctions(ctx: RustContext, type: UnionType): string {
-  const id = key(type);
-  const tags = type.variants
-    .map((variant, index) => `Some(${quote(variant.tag)}) => ${index},`)
-    .join(" ");
-  const arms = type.variants
-    .map(
-      (variant, index) =>
-        `${index} => ${decodeUse(ctx, variant.type, "value", "path")}.map(${type.name}Case::${variant.name}),`,
-    )
+function renderUnionCompletion(ctx: RustContext, type: UnionType): string {
+  const checks = type.variants
+    .map((variant) => {
+      const payload = node(ctx, variant.type.id);
+      const field =
+        payload.kind === "object"
+          ? payload.fields.find((candidate) => candidate.wireName === type.discriminator)
+          : undefined;
+      if (field === undefined) return `${type.name}Case::${variant.name}(_) => {},`;
+      const encoded = encodeUse(ctx, field.type, `payload.${snake(field.name)}()`);
+      return `${type.name}Case::${variant.name}(payload) => { let binding = Binding::Ipc; if ${encoded} != ${quote(JSON.stringify(variant.tag))} { let path = state.child(path, ${quote(type.discriminator)}); state.reject(path, "variant"); } },`;
+    })
     .join("\n");
-  return `/// Private completion shared by construction and decoding of ${type.name}
+  return `/// Immediate discriminator completion
 ///
-/// - path: union pointer
-/// - state: incomplete graph state
+/// - path: union path index
+/// - state: validation accumulator
 /// - value: selected case
-/// - Return: union whose payload carries the discriminator of its case
-fn _complete_${id}(path: &str, state: &mut State, value: ${type.name}Case) -> Option<${type.name}> {
-    match &value { ${type.variants.map((variant) => caseCheck(ctx, type, variant)).join("\n")} }
+/// - Return: matching union candidate
+fn _complete_${key(type)}(path: _Path, state: &mut State, value: ${type.name}Case) -> Option<${type.name}> {
+    match &value { ${checks} }
     Some(${type.name}(value))
-}
-/// Discriminator-first single-pass decoding
-///
-/// - value: incoming JSON
-/// - binding: wire interpretation
-/// - encoding: irrelevant union encoding
-/// - path: union pointer
-/// - state: incomplete graph state
-/// - Return: selected accepted payload
-fn _decode_${id}(value: Value, binding: Binding, _encoding: Option<&str>, path: &str, state: &mut State) -> Option<${type.name}> {
-    if !value.is_object() { state.reject(path, if value.is_null() { "null" } else { "type" }); return None; }
-    let selected = match value.get(${quote(type.discriminator)}).and_then(Value::as_str) { ${tags} _ => usize::MAX };
-    let case = match selected { ${arms}
-      _ => { state.reject(&pointer(path, ${quote(type.discriminator)}), "variant"); None }
-    };
-    _complete_${id}(path, state, case?)
-}
-`;
-}
-
-/** Selected union payload encoding
- * @param ctx - Generation context
- * @param type - Union declaration
- * @returns Rust private function
- */
-function encoder(ctx: RustContext, type: UnionType): string {
-  const arms = type.variants.map(
-    (variant) =>
-      `${type.name}Case::${variant.name}(value) => ${encodeUse(ctx, variant.type, "value")},`,
-  );
-  return `/// Selected union payload encoding
-///
-/// - value: accepted union
-/// - binding: wire interpretation
-/// - encoding: irrelevant union encoding
-/// - Return: discriminator-bearing payload
-fn _encode_${key(type)}(value: &${type.name}, binding: Binding, _encoding: Option<&str>) -> Value {
-    match &value.0 { ${arms.join("\n")} }
-}
-`;
-}
-
-/** Closed discriminator-selected union with constrained construction
- * @param ctx - Generation context
- * @param type - Union declaration
- * @returns Rust declaration and codecs
- */
-export function renderUnion(ctx: RustContext, type: UnionType): string {
-  return `${declaration(ctx, type)}
-${codecFunctions(ctx, type)}${encoder(ctx, type)}${publicCodec(type)}`;
+}`;
 }

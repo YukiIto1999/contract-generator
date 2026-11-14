@@ -150,18 +150,32 @@ Run it with `check: true` in the verification entry of the consuming repository 
 
 ## Output
 
-| Path                                                               | Content                                                                                                                             |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `typescript/contract.ts`                                           | Types, construction, and codecs using `ts-results-es`, `lossless-json`, `@scure/base`, and, only when patterns are present, `re2js` |
-| `typescript/provider.ts`, `typescript/client.ts`                   | Handler interfaces with dispatch, and HTTP and IPC clients                                                                          |
-| `csharp/types/`, `csharp/provider/`, `csharp/client/`              | Three projects, of which the types project references TypeModeling only                                                             |
-| `rust/types/`, `rust/transport/`, `rust/provider/`, `rust/client/` | Four crates, of which the types crate has no HTTP or async-runtime dependency                                                       |
-| `schemas/`, `http/openapi.json`, `docs/reference.md`               | Reference projections that are not complete validation schemas and are not inputs to generation                                     |
+| Path                                                               | Content                                                                                                                                                          |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript/contract.ts`                                           | Types, construction, and codecs using `ts-results-es`, `lossless-json`, `@streamparser/json` 0.0.26, `@scure/base`, and, only when patterns are present, `re2js` |
+| `typescript/provider.ts`, `typescript/client.ts`                   | Handler interfaces with dispatch, and HTTP and IPC clients                                                                                                       |
+| `csharp/types/`, `csharp/provider/`, `csharp/client/`              | Three projects, of which the types project references TypeModeling only                                                                                          |
+| `rust/types/`, `rust/transport/`, `rust/provider/`, `rust/client/` | Four crates, of which the types crate has no HTTP or async-runtime dependency                                                                                    |
+| `schemas/`, `http/openapi.json`, `docs/reference.md`               | Reference projections that are not complete validation schemas and are not inputs to generation                                                                  |
 
 The generated handler interface is the contract side of the connection.
 A hand-written adapter implements it and calls the application, so the application does not depend on generated code.
 A generated provider returns invalid input, an unknown operation, and a cancellation to the host as typed results, and the host decides the response.
 An unknown-member diagnostic names the containing object by its JSON pointer in `path` and the member in `key`.
+
+TypeScript `create`, `decode`, `fromWire`, and provider acceptance return `BoundaryRejection` on failure: read `error.violations` for known-member failures and `error.diagnostics` for unknown-member observations.
+Unknown values never enter either collection, including when a known member fails.
+`encode` and `toWire` retain their violation-array error type.
+
+TypeScript codecs use synchronous stack-safe traversal without a canonical depth limit.
+They reuse completed immutable children, reject declared ancestor cycles rather than shared DAG children, and never read unknown local member values.
+`encode` writes JSON directly; `toWire` produces an independently owned binding graph.
+Hosts remain responsible for byte and output limits before admission or sending.
+
+The JSON wire profile rejects duplicate object member names everywhere, including equal values, escaped-equivalent names, and unknown subtrees.
+Both text and UTF-8 byte entrypoints reject a leading BOM and ill-formed Unicode rather than replacing it.
+U+FEFF inside strings and keys, other well-formed characters, and exact numeric spellings are preserved without normalization or a binary64 restriction.
+An input that is ambiguous under these rules is rejected, never repaired or normalized.
 
 ## Language integration
 
@@ -171,6 +185,12 @@ The generated code returns `Result` and `AsyncResult` from `ts-results-es` and d
 The module named by `typescript-effect-module` exports `Effect<Env, E, A>`, callable as `(env, signal, deadlineAt) => AsyncResult<A, E>`, and `deferEffect`, which takes a function of that shape.
 `createFetchTransport` forwards the signal and adds no timer.
 
+Install the generated module's runtime dependencies directly in the consuming application:
+
+```sh
+npm install --save-exact ts-results-es@7.1.0 lossless-json@4.3.3 @streamparser/json@0.0.26 @scure/base@2.4.0
+```
+
 Pattern-bearing generated modules require the consuming application's own direct runtime dependency `"re2js": "2.10.0"` in `package.json`.
 Do not rely on the generator's transitive installation: generation emits TypeScript source, not a consumer package manifest.
 Pattern-free modules import no RE2JS.
@@ -178,7 +198,8 @@ The generator also uses RE2JS for pattern preflight and constant validation; `@e
 
 ### C#
 
-The generated projects reference TypeModeling and EffectSystem from source checkouts at their `v0.2.0` tags, placed side by side as `typemodeling-dotnet/` and `effectsystem-dotnet/`.
+The generated projects require [TypeModeling `v0.3.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.3.0) and [EffectSystem `v0.3.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.3.0).
+Place the source checkouts side by side as `typemodeling-dotnet/` and `effectsystem-dotnet/`.
 Pass the absolute project paths as the MSBuild properties `TypeModelingProjectPath` and `EffectSystemProjectPath`, using command-line global properties or environment variables.
 A property set only in the consuming `.csproj` is not forwarded to referenced projects; a shared `Directory.Build.props` is another option only if it also covers the generated projects.
 All three generated projects import `csharp/Contract.Analysis.props`, which attaches the existing `TypeModeling.Analyzers` project and makes exhaustiveness diagnostics errors without adding analyzer assemblies as runtime dependencies.
@@ -214,15 +235,18 @@ Every consumer that uses `Effect` must add that import after `Contract.Analysis.
 Both imports keep analyzer assemblies out of runtime dependencies.
 The shared import rejects a missing analyzer project rather than silently omitting the check.
 Generated switches over closed types enumerate every variant without a default or discard arm.
-The pinned analyzer rejects an omitted variant and a switch statement over a closed type, but does not prohibit a consumer's catchall switch-expression arm.
-EffectSystem `v0.2.0` has no deadline type, so each operation takes a `DateTimeOffset? deadline` and passes it on unchanged, and the host owns the timer.
-This deadline representation does not yet satisfy the standard's `Deadline` integration in `languages/csharp/connection.md` and `languages/csharp/coordination.md`; replacing it requires a compatible EffectSystem release that owns the deadline and its execution policy.
+The generated global analyzer configuration enables `TYPMOD021`, which rejects explicit catchall arms over closed types. Consumers import this configuration through `Contract.Analysis.props`, so adding a future variant requires an explicit consumer case.
+Effect-building methods take no deadline argument. The composition root supplies a clock, deadline diagnostics, an absolute `Deadline`, and the deadline-failure factory to `EffectRuntime`; native effects receive that same deadline through `Try`. IPC transports accept `Deadline` with the cancellation token last, and HTTP handlers read `HttpRequestOptionsKey<Deadline>` through `ContractClient.DeadlineOption`.
+Arrays have nominal immutable wrappers named `<ArrayName>Codec.Value`, backed by `ImmutableArray<T>`; nesting them in their codecs avoids introducing additional top-level contract-name exclusions. Their default struct value is invalid, and their factories copy and validate caller-owned collections. Private work stacks handle object, array, union, and provider-default traversal without a contract depth quota; unchanged accepted children retain their identity. JSON acceptance rejects duplicate names, a leading BOM, and ill-formed Unicode even inside unknown values, while preserving valid character and numeric spellings. Byte and output-size limits remain the host's responsibility.
+Object and provider-accepted models are sealed get-only classes with reference equality, not records with recursive equality or `with` cloning. Array values compare their immutable backing-storage identity. Union and outcome records retain exhaustive cases, but their composite payload observations do not recursively traverse object graphs. These observations are not wire-equivalence checks; use generated construction and codecs rather than depending on deep record equality.
 
 ### Rust
 
 The generated crates use the standard `Result` and futures, with `CancellationToken` from `tokio-util` for cancellation.
 The host owns the server: it passes each request to `dispatch_http` or `dispatch_ipc` and maps the returned `ProviderFailure` to its own response.
-A host that receives IPC text parses it with the generated `parse_json`, which keeps the spelling of numbers.
+IPC hosts pass the original UTF-8 JSON `String` directly to `dispatch_ipc` and return its generated envelope text; `IpcTransport` uses the same text boundary. Tauri commands receive that string instead of a generic JSON DOM, so framework parsing cannot impose an earlier nesting limit or normalize exact numbers.
+Construction, decoding, encoding, defaults, equality, debugging, cloning, and destruction of recursive values do not recurse with value depth. Immutable composite payloads are shared; borrowed access and cloning do not copy descendant graphs. Native string and UTF-8 byte decoding enforce the strict JSON profile above, including duplicate names in unknown subtrees.
+The generated Rust README supplies a declaration-graph-derived `recursion_limit` for each consumer crate root. This compiler allowance is separate from runtime JSON depth, is not inherited through dependencies, and must also be applied to independent binary and integration-test roots that own the generated types.
 The manifests carry the lints of the architecture standard and require Rust 1.94.0 or a newer compatible compiler.
 The supported floor follows the pinned native acceptance toolchain, not the edition floor, which does not establish compiler support.
 The minimum-version proof is the existing native Rust collection run once with `RUST_CONTRACT_EXACT_MINIMUM=1`, which fails unless rustc and Cargo are exactly 1.94.0.
@@ -279,7 +303,7 @@ Replacing generator-owned matching therefore does not remove frontend native reg
 After checking a value's kind, applicable codepoint-length and UUID checks may suppress the pattern check for that same value.
 Their violations remain, and siblings and independent fields continue to be checked; not every failing rule on one value is promised a separate violation.
 An executed pattern mismatch remains a `format` violation.
-The existing result algebra is unchanged: success carries the accepted value and unknown-member diagnostics; failure carries violations and no partially accepted value.
+Pattern validation uses the common result algebra: success carries the accepted value and unknown-member diagnostics; failure retains violations and already collected diagnostics without a partially accepted value.
 
 The internal model and JSON Schema/OpenAPI projections retain the original ECMAScript source, not the translated RE2JS expression.
 External schema validators own their execution safety; the generated runtime's guarantee does not transfer to them.

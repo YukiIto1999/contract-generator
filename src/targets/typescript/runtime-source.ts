@@ -1,6 +1,8 @@
 import { runtimeCodecSource } from "./runtime-codec.js";
+import { runtimeJsonSource } from "./runtime-json.js";
 import { runtimeNumbersSource } from "./runtime-numbers.js";
 import { runtimeTemporalSource } from "./runtime-temporal.js";
+import { runtimeTraversalSource } from "./runtime-traversal.js";
 import { runtimeTypesSource } from "./runtime-types.js";
 import { runtimeValuesSource } from "./runtime-values.js";
 
@@ -8,6 +10,8 @@ import { runtimeValuesSource } from "./runtime-values.js";
 export const runtimeSource: string = [
   runtimeTypesSource,
   runtimeValuesSource,
+  runtimeJsonSource,
+  runtimeTraversalSource,
   runtimeNumbersSource,
   runtimeTemporalSource,
   runtimeCodecSource,
@@ -15,7 +19,7 @@ export const runtimeSource: string = [
 
 /** Top-level declaration forms of the emitted support that a contract declaration must not shadow */
 const topLevelDeclaration =
-  /^(?:export\s+)?(?:declare\s+)?(?:const|let|function|class|interface|type)\s+([A-Za-z_$][\w$]*)/gm;
+  /^(?:export\s+)?(?:declare\s+)?(?:const|let|function\s*\*?|class|interface|type)\s+([A-Za-z_$][\w$]*)/gm;
 
 /** Named imports of the emitted support */
 const namedImport = /^import\s+\{([^}]*)\}/gm;

@@ -24,12 +24,12 @@ afterAll(async () => {
 });
 
 native("returns an unknown IPC command to the host as a typed failure", () => {
-  const [unknown] = ipcLines(built, "{}", ['{"command":"nonexistent","parameters":{}}']);
+  const [unknown] = ipcLines(built, "{}", ['{"command":"nonexistent","parameters":"{}"}']);
   expect(unknown).toEqual({ failure: "unknownOperation" });
 });
 
 native("returns invalid IPC parameters to the host as a typed failure with positions", () => {
-  const [invalid] = ipcLines(built, "{}", ['{"command":"grow","parameters":{"tree":5}}']);
+  const [invalid] = ipcLines(built, "{}", ['{"command":"grow","parameters":"{\\"tree\\":5}"}']);
   expect(invalid).toMatchObject({
     failure: "invalidInput",
     violations: [{ path: "/tree", rule: "type" }],

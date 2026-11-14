@@ -11,7 +11,7 @@ import { accepted, type Values } from "./consumer-fixture.js";
  */
 function decodeViolations(text: string): readonly C.Violation[] {
   const result = C.Envelope.decode(text);
-  return result.isErr() ? result.error : [];
+  return result.isErr() ? result.error.violations : [];
 }
 
 /**
@@ -104,8 +104,22 @@ export function valueChecks(fixture: Values): readonly Check[] {
     [
       "known-violation-beside-an-unknown-member-is-rejected",
       () => {
-        const items = [{ kind: "text", text: "four", secret: 7 }];
-        assert.equal(C.Envelope.decode(JSON.stringify({ ...wire, items })).isErr(), true);
+        const items = [{ kind: "text", text: "four", secret: { private: "never retain" } }];
+        for (const [result, prefix] of [
+          [C.Envelope.create({ ...value, items }), ""],
+          [C.Envelope.fromWire({ ...wire, items }), ""],
+          [C.Envelope.decode(JSON.stringify({ ...wire, items })), ""],
+          [C.acceptSubmit({ input: { ...value, items } }), "/input"],
+        ] as const) {
+          assert.equal(result.isErr(), true);
+          if (result.isOk()) throw new Error("Expected mixed boundary rejection");
+          assert.deepEqual(result.error, {
+            violations: [{ path: `${prefix}/items/0/text`, rule: "maxLength" }],
+            diagnostics: [{ path: `${prefix}/items/0`, key: "secret" }],
+          });
+          assert.equal("value" in result.error, false);
+          assert.equal(JSON.stringify(result.error).includes("never retain"), false);
+        }
       },
     ],
     [

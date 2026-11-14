@@ -1,14 +1,20 @@
 import type { Field, ObjectType, Operation } from "../../model/contract-model.js";
-import { hasBaseChecks } from "./checks.js";
 import { node, type RustContext } from "./context.js";
-import { key, quote, snake } from "./naming.js";
+import {
+  decodedHttpBody,
+  encodedHttpBody,
+  encodedMember,
+  initialHttpBody,
+} from "./http-projection-body.js";
+import { httpProjectionPlan, type HttpProjectionPlan } from "./http-projection-plan.js";
+import { parameterValue } from "./http-parameters.js";
+import { doc, quote, snake } from "./naming.js";
 import { rawBytes } from "./media.js";
-import { decodeField, encodeMember } from "./object-members.js";
 
-/** Input member that travels as the raw request body
- * @param ctx - Resolved generation context
+/** Input member carried as an unencoded binary body
+ * @param ctx - Rendering context
  * @param operation - Canonical operation
- * @returns The input object and its raw body member, or undefined when no body member is raw
+ * @returns Raw member with its input object
  */
 export function rawBodyField(
   ctx: RustContext,
@@ -24,136 +30,116 @@ export function rawBodyField(
     : undefined;
 }
 
-/** Statement binding the raw body member from received bytes
- * @param ctx - Resolved generation context
- * @param field - Raw body member
- * @returns Rust statement binding `field_<name>` to the Option the shared completion expects
+/** Transport-free request declarations for resolved HTTP placements
+ * @param plan - Resolved request projection
+ * @returns Typed placement and body declarations
  */
-function bodyMember(ctx: RustContext, field: Field): string {
-  const scalar = node(ctx, field.type.id);
-  const role =
-    scalar.kind === "scalar" && scalar.role !== null ? node(ctx, scalar.role).name : undefined;
-  const wire = quote(field.wireName);
-  const base =
-    scalar.kind === "scalar" && scalar.role === scalar.id && hasBaseChecks(scalar)
-      ? `_check_${key(scalar)}(&value, &pointer(path, ${wire}), state);`
-      : "";
-  const present = `{ let value = ${role === undefined ? "bytes" : `${role}(bytes)`}; ${base} Some(${field.optional ? "Some(value)" : "value"}) }`;
-  const absent = field.optional
-    ? "Some(None)"
-    : `{ state.reject(&pointer(path, ${wire}), "required"); None }`;
-  return `let field_${snake(field.name)} = match bytes { Some(bytes) => ${present}, None => ${absent} };`;
-}
-
-/** Decoding of the nonbody parameters and the raw body through the shared completion
- * @param ctx - Resolved generation context
- * @param operation - Canonical operation
- * @param input - Input object
- * @param body - Raw body member
- * @returns Rust public function
- */
-function binaryDecoder(
-  ctx: RustContext,
-  operation: Operation,
-  input: ObjectType,
-  body: Field,
-): string {
-  const members = input.fields.map((field) =>
-    field.name === body.name ? bodyMember(ctx, field) : decodeField(ctx, field),
-  );
-  const rest = input.fields.map((field) => `, field_${snake(field.name)}`).join("");
-  const others = input.fields.length > 1;
-  const op = snake(operation.name);
+function httpRequestTypes(plan: HttpProjectionPlan): string {
+  const { name, fields } = plan;
   return `
-/// Raw HTTP body completion without binary text conversion
-///
-/// - parameters: parsed nonbody parameter object
-/// - bytes: owned raw body including an empty byte sequence, absent without a body
-/// - Return: completed pre-default operation input
-/// # Errors
-/// Binary constraints or nonbody member violations
-pub fn decode_${op}_http_binary(parameters: Value, bytes: Option<bytes::Bytes>) -> Result<Accepted<${input.name}>, ValidationFailure> {
-    let mut state = State::default();
-    let value = _decode_${op}_http_binary(parameters, bytes, &mut state);
-    state.finish(value)
-}
-/// Raw HTTP body decoding through the input completion shared with every other path
-///
-/// - parameters: parsed nonbody parameter object
-/// - bytes: owned raw body, absent without a body
-/// - state: incomplete graph state
-/// - Return: complete input candidate
-fn _decode_${op}_http_binary(parameters: Value, bytes: Option<bytes::Bytes>, state: &mut State) -> Option<${input.name}> {
-    ${others ? "let binding = Binding::Http;" : ""}
-    let path = "";
-    let ${others ? "mut " : ""}object = object(parameters, path, state)?;
-    ${members.join("\n")}
-    unknown(object, path, state);
-    _complete_${key(input)}(path, state${rest})
+/// HTTP placement text without a transport-library dependency
+#[derive(Default)]
+pub struct ${name}HttpPlacements { ${fields.map((field) => `${doc("", `Received or encoded ${field.wireName} placement`)}\npub ${snake(field.name)}: Option<String>,`).join("\n")} }
+/// HTTP request projection without a transport-library dependency
+pub struct ${name}HttpRequest {
+    /// Nonbody parameter text
+    pub placements: ${name}HttpPlacements,
+    /// Optional owned request body
+    pub body: Option<bytes::Bytes>,
 }`;
 }
 
-/** Nonbody parameter encoding and raw body extraction
- * @param ctx - Resolved generation context
- * @param operation - Canonical operation
- * @param input - Input object
- * @param body - Raw body member
- * @returns Rust public functions
+/** HTTP input completion with placement precedence diagnostics
+ * @param ctx - Rendering context
+ * @param plan - Resolved request projection
+ * @returns Typed request decoder
  */
-function binaryEncoders(
-  ctx: RustContext,
-  operation: Operation,
-  input: ObjectType,
-  body: Field,
-): string {
-  const scalar = node(ctx, body.type.id);
-  const nominal = scalar.kind === "scalar" && scalar.role !== null;
-  const inserts = input.fields
-    .filter((field) => field.name !== body.name)
-    .map((field) => encodeMember(ctx, field, "input", "parameters"));
-  const others = inserts.length > 0;
-  const bound = input.fields.map((field) =>
-    field.name === body.name ? `${snake(field.name)},` : "_,",
-  );
-  const taken = nominal ? "into_value()" : "";
-  const extract = body.optional
-    ? `${snake(body.name)}.map(|value| ${nominal ? "value.into_value()" : "value"})`
-    : `Some(${snake(body.name)}${nominal ? `.${taken}` : ""})`;
-  const op = snake(operation.name);
+function httpRequestDecoder(ctx: RustContext, plan: HttpProjectionPlan): string {
+  const { http, fields, op, name, input } = plan;
+  const shadow =
+    http.body.kind === "parameters"
+      ? fields
+          .map(
+            (field) =>
+              `if parameters.remove(${quote(field.wireName)}).is_some() { placement_diagnostics.push(Diagnostic { path: String::new(), key: ${quote(field.wireName)}.into() }); }`,
+          )
+          .join("\n")
+      : "";
+  const inserts = fields
+    .map(
+      (field) =>
+        `if let Some(text) = placements.${snake(field.name)} { let value = ${parameterValue(ctx, field)}; let id = json.nodes.len(); json.nodes.push(value); parameters.insert(${quote(field.wireName)}.into(), id); }`,
+    )
+    .join("\n");
   return `
-/// Nonbody HTTP parameters without touching raw binary storage
+/// HTTP input completion from native body bytes and text placements
 ///
-/// - input: validated pre-default parameters
-/// - Return: binding-encoded nonbody parameters
-pub fn encode_${op}_http_parameters(input: &${input.name}) -> Value {
-    ${others ? "let binding = Binding::Http;" : ""}
-    let ${others ? "mut " : ""}parameters = Map::new();
-    ${inserts.join("\n")}
-    Value::Object(parameters)
+/// - body: optional complete request body
+/// - placements: received nonbody parameter text
+/// - Return: completed input with diagnostics
+/// # Errors
+/// Malformed JSON or parameter contract violations
+pub fn decode_${op}_http_request(${http.body.kind === "none" ? "_body" : "body"}: Option<bytes::Bytes>, ${fields.length > 0 ? "placements" : "_placements"}: ${name}HttpPlacements) -> Result<Accepted<${input.name}>, ValidationFailure> {
+    ${initialHttpBody(plan)}
+    let mut placement_diagnostics = Vec::new();
+    ${shadow}
+    ${inserts}
+    let mut state = State::default();
+    ${decodedHttpBody(ctx, plan)}
+    match state.finish(value) { Ok(mut accepted) => { accepted.diagnostics.append(&mut placement_diagnostics); Ok(accepted) }, Err(mut failure) => { failure.diagnostics.append(&mut placement_diagnostics); Err(failure) } }
+}`;
 }
-/// Consuming binary parameter extraction without copying owned bytes
+
+/** HTTP request encoding with scalar text placements
+ * @param ctx - Rendering context
+ * @param plan - Resolved request projection
+ * @returns Typed request encoder
+ */
+function httpRequestEncoder(ctx: RustContext, plan: HttpProjectionPlan): string {
+  const { fields, usesInput, usesEncoding, input, op, name } = plan;
+  const placementEncoding = fields
+    .map((field) =>
+      encodedMember(
+        ctx,
+        field,
+        `placements.${snake(field.name)} = Some(if text.starts_with('"') { let Ok(value) = serde_json::from_str::<String>(&text) else { panic!("encoded scalar string"); }; value } else { text });`,
+      ),
+    )
+    .join("\n");
+  return `
+/// HTTP body projection with exact text placements
 ///
-/// - input: owned pre-default parameters after nonbody encoding
-/// - Return: raw owned binary body with optional presence
-pub fn into_${op}_http_body(input: ${input.name}) -> Option<bytes::Bytes> {
-    let (${bound.join(" ")}) = input.into_parts();
-    ${extract}
+/// - input: validated pre-default input
+/// - Return: owned body and nonbody text
+/// # Panics
+/// An encoded placement violating its scalar wire representation
+pub fn encode_${op}_http_request(${usesInput ? "input" : "_input"}: ${input.name}) -> ${name}HttpRequest {
+    ${usesEncoding ? "let binding = Binding::Http;" : ""}
+    let ${fields.length > 0 ? "mut " : ""}placements = ${name}HttpPlacements::default();
+    ${placementEncoding}
+    ${encodedHttpBody(ctx, plan)}
+    ${name}HttpRequest { placements, body }
 }
 `;
 }
 
-/** Raw binary request handling without a base64 encode/decode detour
- * @param ctx - Resolved generation context
- * @returns Pure ownership-preserving operation helpers
+/** Transport-free text placements and body projection for one HTTP operation
+ * @param ctx - Rendering context
+ * @param operation - Canonical operation
+ * @returns Types-crate request projection codecs
+ */
+function httpProjection(ctx: RustContext, operation: Operation): string {
+  const input = node(ctx, operation.input);
+  if (input.kind !== "object") return "";
+  const plan = httpProjectionPlan(operation, input, rawBodyField(ctx, operation)?.field);
+  if (plan === undefined) return "";
+  return httpRequestTypes(plan) + httpRequestDecoder(ctx, plan) + httpRequestEncoder(ctx, plan);
+}
+
+/** Operation-specific HTTP request codecs
+ * @param ctx - Rendering context
+ * @returns Transport-independent projection helpers
  */
 export function renderBinary(ctx: RustContext): string {
-  return ctx.model.operations
-    .map((operation) => {
-      const raw = rawBodyField(ctx, operation);
-      return raw === undefined
-        ? ""
-        : binaryDecoder(ctx, operation, raw.input, raw.field) +
-            binaryEncoders(ctx, operation, raw.input, raw.field);
-    })
-    .join("\n");
+  return ctx.model.operations.map((operation) => httpProjection(ctx, operation)).join("\n");
 }

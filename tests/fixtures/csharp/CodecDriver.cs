@@ -79,12 +79,12 @@ internal static class CodecDriver
     private static void Construct(JsonElement request, string payload, string binding, Utf8JsonWriter writer)
     {
         var decoded = EnvelopeCodec.Decode(payload, binding);
-        if (decoded is not Result<Accepted<Envelope>, ContractFailure>.Succeeded accepted)
+        if (decoded.IsFailed(out _, out var accepted))
         {
             Observe(decoded, value => EnvelopeCodec.Encode(value, binding), writer);
             return;
         }
-        var source = accepted.Value.Value;
+        var source = accepted.Value;
         var mutable = source.Items.ToArray();
         string label = request.TryGetProperty("label", out var labelProperty) ? labelProperty.GetString()! : source.Label;
         int count = request.TryGetProperty("count", out var countProperty) ? countProperty.GetInt32() : source.Count;
@@ -113,17 +113,17 @@ internal static class CodecDriver
     /// <param name="writer">JSON observation output</param>
     private static void Observe<T>(Result<Accepted<T>, ContractFailure> result, Func<T, Result<string, ContractFailure>> encode, Utf8JsonWriter writer)
     {
-        if (result is Result<Accepted<T>, ContractFailure>.Succeeded accepted)
+        if (!result.IsFailed(out var failed, out var accepted))
         {
             writer.WriteBoolean("accepted", true);
-            var encoded = encode(accepted.Value.Value);
-            if (encoded is not Result<string, ContractFailure>.Succeeded json) throw new InvalidOperationException("Accepted generated value failed output guard");
-            writer.WriteString("encoded", json.Value);
-            Diagnostics(writer, accepted.Value.Diagnostics);
+            var encoded = encode(accepted.Value);
+            if (encoded.IsFailed(out _, out var json)) throw new InvalidOperationException("Accepted generated value failed output guard");
+            writer.WriteString("encoded", json);
+            Diagnostics(writer, accepted.Diagnostics);
             writer.WriteStartArray("violations"); writer.WriteEndArray();
             return;
         }
-        var rejected = ((Result<Accepted<T>, ContractFailure>.Failed)result).Failure;
+        var rejected = failed.Failure;
         writer.WriteBoolean("accepted", false);
         Diagnostics(writer, rejected.Diagnostics);
         writer.WriteStartArray("violations");
@@ -139,15 +139,15 @@ internal static class CodecDriver
     /// <param name="writer">JSON observation output</param>
     private static void ObserveEncoded(Result<string, ContractFailure> result, Utf8JsonWriter writer)
     {
-        if (result is Result<string, ContractFailure>.Succeeded json)
+        if (!result.IsFailed(out var failed, out var json))
         {
             writer.WriteBoolean("accepted", true);
-            writer.WriteString("encoded", json.Value);
+            writer.WriteString("encoded", json);
             Diagnostics(writer, ImmutableArray<UnknownProperty>.Empty);
             writer.WriteStartArray("violations"); writer.WriteEndArray();
             return;
         }
-        var rejected = ((Result<string, ContractFailure>.Failed)result).Failure;
+        var rejected = failed.Failure;
         writer.WriteBoolean("accepted", false);
         Diagnostics(writer, rejected.Diagnostics);
         writer.WriteStartArray("violations");

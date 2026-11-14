@@ -37,6 +37,18 @@ fn owned_children_move_without_redecode_or_clone() {
 }
 
 #[test]
+fn shared_extraction_cannot_mutate_an_existing_value() {
+    let original = decode_envelope(CANONICAL, Binding::Ipc).expect("canonical input").value;
+    let shared = original.clone();
+    let (_, _, _, items, _, _, _, _, _, _, _) = shared.into_parts();
+    let mut extracted = items.into_vec();
+    assert_eq!(extracted.len(), 1);
+    extracted.clear();
+    assert_eq!(original.items().as_slice().len(), 1);
+    assert_eq!(encode_envelope(&original, Binding::Ipc), encode_envelope(&decode_envelope(CANONICAL, Binding::Ipc).expect("canonical input").value, Binding::Ipc));
+}
+
+#[test]
 fn construction_distinguishes_every_presence_state_on_the_wire() {
     assert!(encoded(&rebuild(None, None, None)).get("optionalNullable").is_none());
     assert_eq!(encoded(&rebuild(Some(None), None, None)).get("optionalNullable"), Some(&serde_json::Value::Null));
@@ -49,10 +61,10 @@ fn construction_distinguishes_every_presence_state_on_the_wire() {
 
 #[test]
 fn construction_rejects_a_discriminator_that_names_another_variant() {
-    let failure = BinaryItemKind::try_new(json!("text")).expect_err("the tag of another variant is not this variant's tag");
+    let failure = BinaryItemKind::try_new("text".to_owned()).expect_err("the tag of another variant is not this variant's tag");
     assert_eq!(failure.violations, vec![Violation { path: String::new(), rule: "literal".into() }]);
-    assert!(BinaryItemKind::try_new(json!("binary")).is_ok());
-    assert!(BinaryItemKind::try_new(serde_json::Value::Null).is_err());
+    assert!(BinaryItemKind::try_new("binary".to_owned()).is_ok());
+    assert!(decode_binary_item_kind("null", Binding::Ipc).is_err());
 }
 
 #[test]

@@ -1,51 +1,23 @@
 import type { HttpBinding, HttpResult } from "../../model/binding-model.js";
-import type { Field, ObjectType, Operation } from "../../model/contract-model.js";
+import type { Operation } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
-import { rawBodyField } from "./render-binary.js";
 import { complete } from "./client-complete.js";
 import { node, type RustContext } from "./context.js";
-import { doc, key, quote, snake, stem } from "./naming.js";
+import { doc, quote, snake, stem } from "./naming.js";
 import { essenceOf, rawBytes } from "./media.js";
 
 /** Placement statement of one nonbody parameter
- * @param input - Operation input object
- * @param binding - HTTP binding
  * @param mapping - Parameter placement
  * @returns Rust statement moving the encoded parameter to its location
  */
-function placement(input: ObjectType, mapping: HttpBinding["parameters"][number]): string {
-  const field = input.fields.find((candidate) => candidate.name === mapping.parameter);
-  if (field === undefined) return "";
+function placement(mapping: HttpBinding["parameters"][number]): string {
   const target =
     mapping.location === "path"
       ? `let Some(segment) = path_segment(&value) else { return Err(OperationFailure::Communication); }; route = route.replace(${quote(`{${mapping.wireName}}`)}, &segment);`
       : mapping.location === "query"
         ? `query.push((${quote(mapping.wireName)}, value));`
         : `let Ok(value) = reqwest::header::HeaderValue::from_str(&value) else { return Err(OperationFailure::Communication); }; headers.insert(reqwest::header::HeaderName::from_static(${quote(mapping.wireName.toLowerCase())}), value);`;
-  return `if let Some(value) = parameters.remove(${quote(field.wireName)}) {
-      let value = parameter_text(value);
-      ${target}
-    }`;
-}
-
-/** Request body statement
- * @param binding - HTTP binding
- * @param op - Operation function stem
- * @param field - Body parameter member
- * @param raw - Whether the body is raw bytes
- * @returns Rust statement binding `body`, or an empty string for a bodyless request
- */
-function bodyStatement(
-  binding: HttpBinding,
-  op: string,
-  field: Field | undefined,
-  raw: boolean,
-): string {
-  if (binding.body.kind === "none") return "";
-  if (binding.body.kind === "parameters")
-    return "let body = Some(Value::Object(parameters).to_string().into_bytes());";
-  if (raw) return `let body = into_${op}_http_body(input);`;
-  return `let body = parameters.remove(${quote(field?.wireName ?? "")}).map(|value| value.to_string().into_bytes());`;
+  return `if let Some(value) = placements.${snake(mapping.parameter)} { ${target} }`;
 }
 
 /** Result identity condition of one mapping
@@ -79,7 +51,7 @@ function resultBranch(ctx: RustContext, operation: Operation, mapping: HttpResul
   const parse =
     outcome.type === undefined || raw
       ? ""
-      : 'let body = match std::str::from_utf8(&response.body).ok().and_then(|text| parse_json(text).ok()) { Some(body) => body, None if gateway => return Err(OperationFailure::Communication), None => panic!("a selected HTTP payload is not JSON") };';
+      : 'let body = match std::str::from_utf8(&response.body) { Ok(body) => body, Err(_) if gateway => return Err(OperationFailure::Communication), Err(_) => panic!("a selected HTTP payload is not UTF-8 JSON") };';
   return `if ${identity(mapping)} {
         ${parse}
         return { ${complete(operation, outcome, raw ? "response.body" : "body", "gateway", raw)} };
@@ -109,32 +81,19 @@ export function renderHttp(ctx: RustContext, operation: Operation): string {
   if (binding === undefined || input.kind !== "object") return "";
   const op = snake(operation.name);
   const name = stem(operation);
-  const raw = rawBodyField(ctx, operation);
-  const bodyField =
-    binding.body.kind === "parameter"
-      ? input.fields.find(
-          (field) => binding.body.kind === "parameter" && field.name === binding.body.parameter,
-        )
-      : undefined;
   const routed = binding.parameters.some((mapping) => mapping.location === "path");
   const queried = binding.parameters.some((mapping) => mapping.location === "query");
   const headed = binding.parameters.some((mapping) => mapping.location === "header");
-  const mutated = binding.parameters.length > 0 || (bodyField !== undefined && raw === undefined);
-  const usesParameters = mutated || binding.body.kind === "parameters";
-  const encoded = raw
-    ? `encode_${op}_http_parameters(&input)`
-    : `encode_${key(input)}_value(&input, Binding::Http)`;
   const typed = operation.outcomes.some((outcome) => outcome.type !== undefined);
   return `${doc(operation.description, "Deferred HTTP operation with exact result selection")}
 ${httpContract}
-pub async fn ${op}_http<T: HttpTransport>(transport: &T, ${usesParameters || raw ? "input" : "_input"}: ${input.name}, token: &CancellationToken, deadline: Option<Instant>) -> Result<Accepted<${name}Success>, OperationFailure<${name}Rejection>> {
+pub async fn ${op}_http<T: HttpTransport>(transport: &T, input: ${input.name}, token: &CancellationToken, deadline: Option<Instant>) -> Result<Accepted<${name}Success>, OperationFailure<${name}Rejection>> {
     if token.is_cancelled() { return Err(OperationFailure::Cancelled); }
-    ${usesParameters ? `let Value::Object(${mutated ? "mut " : ""}parameters) = ${encoded} else { unreachable!("operation parameters are an object"); };` : ""}
+    let ${name}HttpRequest { ${binding.parameters.length > 0 ? "placements" : "placements: _"}, ${binding.body.kind === "none" ? "body: _" : "body"} } = encode_${op}_http_request(input);
     ${routed ? `let mut route = ${quote(binding.path)}.to_owned();` : `let route = ${quote(binding.path)};`}
     ${queried ? "let mut query: Vec<(&str, String)> = Vec::new();" : ""}
     let ${binding.body.kind !== "none" || headed ? "mut " : ""}headers = reqwest::header::HeaderMap::new();
-    ${binding.parameters.map((mapping) => placement(input, mapping)).join("\n")}
-    ${bodyStatement(binding, op, bodyField, raw !== undefined)}
+    ${binding.parameters.map((mapping) => placement(mapping)).join("\n")}
     let Ok(${queried ? "mut " : ""}url) = transport.origin().join(${routed ? "&route" : "route"}) else { return Err(OperationFailure::Communication); };
     if !same_origin(&url, transport.origin()) { return Err(OperationFailure::Communication); }
     ${queried ? "if !query.is_empty() { let mut pairs = url.query_pairs_mut(); for (name, value) in query { pairs.append_pair(name, &value); } }" : ""}

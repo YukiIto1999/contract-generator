@@ -48,18 +48,17 @@ internal static class SourceDataDriver
     /// <param name="writer">JSON observation output</param>
     private static void Observe<T>(Result<Accepted<T>, ContractFailure> result, Func<T, Result<string, ContractFailure>> encode, Utf8JsonWriter writer)
     {
-        if (result is Result<Accepted<T>, ContractFailure>.Succeeded accepted)
+        if (!result.IsFailed(out var rejected, out var accepted))
         {
             writer.WriteBoolean("accepted", true);
-            var encoded = encode(accepted.Value.Value);
-            if (encoded is not Result<string, ContractFailure>.Succeeded json) throw new InvalidOperationException("Accepted generated value failed output guard");
-            writer.WriteString("encoded", json.Value);
+            var encoded = encode(accepted.Value);
+            if (encoded.IsFailed(out _, out var json)) throw new InvalidOperationException("Accepted generated value failed output guard");
+            writer.WriteString("encoded", json);
             return;
         }
-        var rejected = ((Result<Accepted<T>, ContractFailure>.Failed)result).Failure;
         writer.WriteBoolean("accepted", false);
         writer.WriteStartArray("violations");
-        foreach (var violation in rejected.Violations)
+        foreach (var violation in rejected.Failure.Violations)
         {
             writer.WriteStartObject(); writer.WriteString("path", violation.Path); writer.WriteString("rule", violation.Rule); writer.WriteEndObject();
         }

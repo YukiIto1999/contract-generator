@@ -115,7 +115,7 @@ function handlerSource(types: Types, operation: Operation, http: HttpBinding): s
       ? []
       : [
           `const violations = place${stem}Parameters(${["parameters", ...needs.map(([, name]) => name)].join(", ")});`,
-          "if (violations !== undefined) return invalidInput(violations);",
+          "if (violations !== undefined) return invalidInput(violations, dropped);",
         ];
   const parameters = [
     "parts: ProviderParts<Env>",
@@ -145,7 +145,7 @@ function handlerSource(types: Types, operation: Operation, http: HttpBinding): s
         drop,
         place,
         `const accepted = C.accept${stem}(parameters, "http");`,
-        "if (accepted.isErr()) return invalidInput(accepted.error);",
+        "if (accepted.isErr()) return invalidInput(accepted.error.violations, [...accepted.error.diagnostics, ...dropped]);",
         "context.signal.throwIfAborted();",
         `const result = await parts.handlers.${operation.name}(accepted.value.value)(env, context.signal, context.deadlineAt);`,
         `return Ok(Object.freeze({ value: respond${stem}Http(result), diagnostics: [...accepted.value.diagnostics, ...dropped] }));`,

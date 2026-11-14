@@ -41,15 +41,32 @@ export function directChecks(fixture: Values, env: Environment): readonly Check[
       async () => {
         for (const limit of [null, 4]) {
           const before = env.limits.length;
-          const local = await provider.submit({ input: value, limit } as unknown as C.SubmitInput)(
-            env,
-            signal,
-            Infinity,
-          );
-          assert.equal(local.isErr() && "kind" in local.error && local.error.kind, "invalid-input");
-          const wireInput = JSON.stringify({ input: wire, limit });
+          const secret = { private: "never retain" };
+          const local = await provider.submit({
+            input: value,
+            limit,
+            secret,
+          } as unknown as C.SubmitInput)(env, signal, Infinity);
+          const wireInput = JSON.stringify({ input: wire, limit, secret });
           const ipc = await provider.handleIpc("submit", wireInput)(env, signal, Infinity);
-          assert.equal(ipc.isErr() && ipc.error.kind, "invalid-input");
+          const http = await provider.handleHttp(
+            new Request("http://localhost/submit", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: wireInput,
+            }),
+          )(env, signal, Infinity);
+          for (const result of [local, ipc, http]) {
+            assert.equal(result.isErr(), true);
+            if (result.isOk() || !("kind" in result.error) || result.error.kind !== "invalid-input")
+              throw new Error("Expected invalid provider input");
+            assert.deepEqual(result.error.diagnostics, [{ path: "", key: "secret" }]);
+            assert.deepEqual(result.error.violations, [
+              { path: "/limit", rule: limit === null ? "null" : "maximum" },
+            ]);
+            assert.equal("value" in result.error, false);
+            assert.equal(JSON.stringify(result.error).includes("never retain"), false);
+          }
           assert.equal(env.limits.length, before);
         }
       },

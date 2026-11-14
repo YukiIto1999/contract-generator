@@ -52,7 +52,7 @@ export function operationSource(context: ContractContext, operation: Operation):
     defaulted.length === 0
       ? input.name
       : `${input.name} & { ${defaulted.map((field) => `readonly ${quote(field.name)}: ${referenceType(context, field.type)}`).join("; ")} }`;
-  const acceptSignature = `Result<Accepted<${accepted}>, readonly Violation[]>`;
+  const acceptSignature = `Result<Accepted<${accepted}>, BoundaryRejection>`;
   const outcomes = operation.outcomes.map(
     (outcome) => `${quote(outcome.name)}: ${outcomeCodec(context, stem, outcome)}`,
   );
@@ -73,7 +73,7 @@ export function operationSource(context: ContractContext, operation: Operation):
           ["input", "Untrusted operation parameters"],
           ["mode", "Local or binding origin"],
         ],
-        returns: "Effective immutable handler input or violations",
+        returns: "Effective immutable handler input or rejection details",
       },
     ),
     `export function accept${stem}(input: unknown, mode: "local" | WireBinding = "local"): ${acceptSignature} {`,

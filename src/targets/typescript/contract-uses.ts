@@ -33,7 +33,8 @@ export function useCall(
   path: string,
   mode = "mode",
 ): string {
-  return readerCall(name, useShape(context, use), value, path, undefined, mode);
+  const call = readerCall(name, useShape(context, use), value, path, undefined, mode);
+  return `((yield ${call}) as ${referenceType(context, use)} | undefined)`;
 }
 
 /**
@@ -60,7 +61,7 @@ export function writeUse(context: ContractContext, use: TypeUse, value: string):
       ? `pickEncoding(binding, ${quote(use.encodings)})`
       : undefined;
   const call = writerCall(context.writers.get(use.id)!, shape, value, encoding);
-  return use.nullable ? `(${value} === null ? null : ${call})` : call;
+  return use.nullable ? `(${value} === null ? writeNull() : ${call})` : call;
 }
 
 /**
@@ -88,7 +89,7 @@ export function useReaderSource(context: ContractContext, entry: UseEntry): stri
     use.nullable
       ? "if (value === null) return null;"
       : 'if (value === null) return invalid(state, path, "null");',
-    `const result = ${call};`,
+    `const result = (yield ${call}) as ${node.name} | undefined;`,
     "if (result === undefined) return undefined;",
     ...checks,
     "return result;",

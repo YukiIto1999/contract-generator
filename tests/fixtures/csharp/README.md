@@ -9,37 +9,34 @@ The features driver exchanges real generated client and provider messages throug
 
 ## Source prerequisites
 
-Use .NET 10 and C# 14 with these immutable source revisions:
+Use .NET 10 and C# 14 with source revisions that provide the APIs listed below:
 
-| Source                                                   | Required commit                                       | MSBuild property                                                            |
-| -------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
-| `https://github.com/YukiIto1999/typemodeling-dotnet.git` | `98a8ac5a2ad4384a18d8fc5cb100dd07cd795a33` (`v0.2.0`) | `TypeModelingProjectPath`, ending in `src/TypeModeling/TypeModeling.csproj` |
-| `https://github.com/YukiIto1999/effectsystem-dotnet.git` | `8d07a0e06a16a402d550af8571ed1f025a7df5f5` (`v0.2.0`) | `EffectSystemProjectPath`, ending in `src/EffectSystem/EffectSystem.csproj` |
+| Source                                                   | Required API                                                 | MSBuild property                                                            |
+| -------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `https://github.com/YukiIto1999/typemodeling-dotnet.git` | Typed result factories and opt-in `TYPMOD021`                | `TypeModelingProjectPath`, ending in `src/TypeModeling/TypeModeling.csproj` |
+| `https://github.com/YukiIto1999/effectsystem-dotnet.git` | Absolute `Deadline`, runtime clock, and deadline diagnostics | `EffectSystemProjectPath`, ending in `src/EffectSystem/EffectSystem.csproj` |
 
 The source repositories must be writable copies in sibling directories named `typemodeling-dotnet` and `effectsystem-dotnet`.
 The EffectSystem source project has relative project references to the sibling TypeModeling runtime and analyzer.
 Neither generated code nor fixture projects contain workstation paths or unpublished NuGet package references.
 Both MSBuild properties can be supplied explicitly or inherited from the environment; `devenv shell` exports them for the prepared checkouts under `work/native-dependencies`.
 
-The inspected TypeModeling API is `TypeModeling.Domain.Result<TValue,TFailure>` with nested `Succeeded(Value)` and `Failed(Failure)` records.
-The inspected EffectSystem API is `EffectContext<TR,TF>.Succeed`, `Fail`, `Defect`, `Sync`, `Try`, `Access`, with `Bind`, `Map`, `MapFailure`, and `Recover` extensions.
-The v0.2.0 effect callback receives `CancellationToken`; it has no `Deadline`, `FromResult`, or `AsyncResult` API.
-Generated operations therefore receive an explicit nullable `DateTimeOffset` deadline and forward it as metadata without adding a timer.
-The injected IPC transport receives the same deadline, and native HTTP handlers can read `ContractClient.DeadlineOption` from `HttpRequestMessage.Options`.
-The host owns the actual deadline cancellation token and its termination reason.
+TypeModeling exposes `Result.Succeeded(value)`, `Result.Failed(failure)`, and the typed `IsFailed(out failed, out value)` eliminator.
+Effect-building methods do not accept deadline metadata. Their native `Try` callbacks receive requirements, the runtime's `Deadline`, and the cancellation token.
+The composition root constructs `EffectRuntime` with explicit requirements, a clock, and a deadline-diagnostics collector, then calls `Run` with the absolute deadline and a typed deadline-failure factory.
+The IPC transport accepts that same `Deadline` with the cancellation token last; HTTP handlers read it through `ContractClient.DeadlineOption`.
+Parent cancellation remains cancellation, while expiration produces the host-selected typed deadline failure. The diagnostics collector records completed executions that overrun their deadline.
 
 Every generated unit and fixture project attaches the existing `TypeModeling.Analyzers` source project as a build-only analyzer (`OutputItemType="Analyzer"`, `ReferenceOutputAssembly="false"`, `PrivateAssets="all"`).
 Its path is derived from `TypeModelingProjectPath` relative to the consuming project, so no analyzer-path setting is required.
-Exhaustiveness diagnostics (`CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847`, and `TYPMOD001`) are errors.
+Exhaustiveness diagnostics (`CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847`, and opt-in `TYPMOD021`) are errors. The generated global analyzer configuration reaches consumer projects through the shared import.
 The types-only runtime-dependency test also rejects analyzer and Roslyn assemblies in the output and dependency manifest.
 
-These sources were built and executed with .NET SDK 10.0.201 from `devenv shell`.
-The generated units, the three drivers and the accepted role probes compile without any compiler diagnostic of their own; each rejected role probe fails with exactly one `CS0029`.
-The dependency projects were built from the same checkouts and reported no diagnostic either.
+The current source cutover requires native verification against compatible dependency sources. Older fixture execution evidence does not establish compatibility with the new deadline and result APIs.
 
 ## Running
 
-From the repository root inside `devenv shell`:
+From the repository root inside `devenv shell`, after `npm run prepare:native`, which also runs the online package audit and therefore needs network access:
 
 ```sh
 npm run verify:push
@@ -102,15 +99,15 @@ The fixture's `Directory.Build.props` imports the delivered `csharp/Contract.Ana
 The default `ExhaustiveConsumer` matches every public variant without a catchall, including operation failures, provider failures and the runtime's generic `Result`.
 Its executable observes both union and enumeration variants and the ordinary rejection of unknown or null wire inputs.
 The `MissingChoice`, `MissingMixed`, `MissingSuccess`, `MissingRejection`, `MissingFailure`, `MissingProviderFailure`, `GuardedChoice` and `OpenExpression` probes are expected to fail with an exhaustiveness error.
-`ClosedStatement` is expected to fail with `TYPMOD001`.
 `UnconstructedEffect` is expected to fail with `EFFSYS008` when a consumer returns `default` instead of constructing an effect.
+`CompetingDeadlineTimer` must fail with `EFFSYS014` for creating another timer from an incoming deadline.
+`ReconstructedDeadline` must fail with `EFFSYS015` for forwarding a reconstructed deadline instead of the received value.
 These are native consumer compilation tests, not generated-source or project-wiring assertions.
 
-The pinned analyzer does **not** forbid a discard arm in a consumer's switch expression.
-Generated closed switches themselves have no catchall; a consumer's catchall still needs review.
-The exact pinned evidence is `src/TypeModeling.Analyzers/AnalyzerReleases.Shipped.md:10` (only `TYPMOD001`), `diagnostics/closedunionswitchstatement/ClosedUnionSwitchStatementAnalyzer.cs:29-33` (switch-statement registration), and `suppression/closedunionexhaustiveness/ClosedUnionExhaustivenessSuppressor.cs:65-84` (suppression only for covered `CS8509` and `CS8524`).
-Those latter paths are relative to the analyzer source directory in the pinned TypeModeling checkout.
-The closed annotation is recognized by its `TypeModeling.Domain.ClosedUnionAttribute` metadata name and nested sealed subclasses (`facts/ClosedTypeSet.cs:10-12,25-43`); the generator already emits that shape.
+`FutureChoice` must fail with `TYPMOD021` when a catchall would accept future closed cases.
+The generated `Contract.Analysis.globalconfig` enables this opt-in rule through the shared import.
+These probes require compatible TypeModeling and EffectSystem checkouts with the runtime APIs and analyzer rules documented in the repository README; the older dependency pins do not provide that combination.
+The generated closed hierarchy uses the dependency's `ClosedAttribute` and nested sealed variants rather than a private analyzer annotation.
 
 Run `npx vp test run tests/integration/medium/csharp-exhaustiveness.test.ts` inside `devenv shell` for the focused consumer checks.
 
@@ -150,7 +147,7 @@ For `submit`, the payload is `{"input":<Envelope>,"limit":<optional 1..3>}`.
 
 The handwritten fixture handler selects `Created` for `input.count=1`, `Queued` for `2`, and `Completed` for `3`.
 For the first two results its receipt is `limit:N`, exposing provider default application to `3` without client-side repair.
-The label `rej` selects the declared rejection; `zzz` introduces a cancellable 200 ms handler wait; `dl` returns the deadline the handler received as `deadline:<ISO instant>` or `deadline:none`; `pid` returns the handler's process id.
+The label `rej` selects the declared rejection; `zzz` introduces a cancellable 200 ms handler wait; `dl` returns the absolute instant received by the native effect as `deadline:<ISO instant>`; `pid` returns the handler's process id.
 The adapter calls generated factories for receipts and rejections rather than recreating validation.
 
 IPC requests start the same executable with `--ipc-worker` in a separate process, pass the generated command and parameters, and return the provider's resolved tagged envelope.
@@ -162,9 +159,9 @@ The kinds are `eof`, `garbage`, `truncated`, `unknown-tag`, `void-with-body`, `m
 This is generic injected IPC, not a native Tauri application or UI test.
 
 Optional scenario inputs are `cancel:"before"`, `cancel:"after"`, `cancelAfterMs`, an absolute ISO `deadline`, and `deadlineAfterMs` (relative to the moment the scenario starts).
-The fixture host owns deadline timers and reports parent cancellation ahead of deadline cancellation.
+The fixture composition root supplies the runtime clock, deadline, failure factory, and diagnostics collector; the runtime owns deadline enforcement.
 `cancel:"after"` cancels only after the generated runtime has returned, so its completed result must remain unchanged.
-The output carries `httpDeadline` when the generated HTTP client forwarded a deadline in the request options.
+Requests with `observeDeadline:true` add deadline instrumentation, including `httpDeadline` when the generated HTTP client forwards the deadline in request options; ordinary business observations do not include those fields.
 The driver can target a real HTTP fault server for undeclared statuses, wrong media types, declared gateway matches and mismatches, and truncated response bodies; `csharp-peers.ts` provides `startRawPeer` and `httpResponse` for hand-written HTTP/1.1 bytes, and `parseRawRequest` for the request the generated client sent.
 The output `exit` is `succeeded`, `declared`, `input`, `transport`, `defected`, or `canceled` with the generated case or host-owned reason where applicable.
 
@@ -185,6 +182,14 @@ The `defaults` handler reports the effective branch through the public propertie
 
 A third contract, namespace `SourceData`, has no operations. `csharp-source-data.test.ts` writes its TypeSpec inline from `hostile-source.ts` instead of reading a `.tsp` file, because its descriptions, wire name, closed values and tag carry NEL, LS, PS, CR, direction controls and control characters that a source file would hide in diffs. `SourceDataDriver` references only the generated types project and prints, for each JSON-lines request with a `type` and a `payload`, `accepted`, `encoded` and the violations. The test reads the XML documentation that the compiler wrote for the types assembly, so a description that left its documentation line fails by its text.
 
+## Deep native boundaries
+
+`csharp-depth.test.ts` generates a separate contract and runs `DepthDriver.cs` through the existing native harness. Its public-consumer cases construct, encode, and decode object, recursive-array, and union values at depths 64, 128, 1,000, and 20,000, checking the leaf rather than output length.
+The same driver covers deep positioned violations with unknown-member observations, malformed tails, duplicate names including escaped equivalents and unknown subtrees, BOM and Unicode rejection, and successful input after failure.
+Provider acceptance cases cover deep defaults, dependent default constants, explicit null, unchanged input, and accepted-child identity. Array cases cover the invalid default struct and ownership of caller collections.
+Lifecycle cases call `Equals`, `GetHashCode`, and `ToString` on 20,000-level values without changing their existing meaning: objects retain reference equality, array wrappers retain immutable backing-storage equality, and union records compare their object payloads with that existing reference equality. A second wrapper around the same union payload is equal; a freshly decoded payload is not.
+These cases are executable specifications; their presence alone is not a native execution result.
+
 ## Not exercised
 
 - A native Tauri application or UI; IPC is the generic injected transport over a child process.
@@ -194,5 +199,5 @@ A third contract, namespace `SourceData`, has no operations. `csharp-source-data
 - Cancellation of the provider-side handler by a dropped HTTP connection: the fixture server passes `CancellationToken.None`, which is a host decision, so only client-side cancellation is observed.
 - A request body cut off mid-transfer on the provider side, concurrent requests, large payloads and performance.
 - A `Sample` result selected by a header, because the `Sample` contract declares none; the `Features` contract covers header selection for HTTP. IPC results are selected by tag only.
-- Duplicate query or header parameters and duplicate object members are rejected by the generated code but have no expectation here because the contract does not specify their rule.
+- Duplicate query or header parameters have no expectation here; duplicate object names are part of the strict JSON cases in the depth driver.
 - A default whose profile-accepted constant exceeds the finite range of `float32` or `float64`: the generated reader rejects it as a format violation, so the profile has to reject it.

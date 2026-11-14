@@ -134,7 +134,7 @@ function checkMethod(c: CSharpContext, method: string, use: TypeUse, subject: st
       "path",
       "decoded",
     ]),
-    `internal static void ${method}(${c.use(use)} value, ReadContext c, string path, bool decoded) {`,
+    `internal static void ${method}(${c.use(use)} value, ReadContext c, Wire.Path path, bool decoded) {`,
     use.nullable && `if (${absent}) return;`,
     "int before = c.ViolationCount;",
     `if (!decoded) ${c.codec(use.id)}.Check(${c.unwrap(use, "value")}, c, path);`,

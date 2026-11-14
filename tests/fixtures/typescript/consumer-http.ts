@@ -110,6 +110,7 @@ export function httpChecks(
         const forged = {
           ...input,
           input: { ...value, requestId: "not-a-uuid" },
+          secret: { private: "never retain" },
         } as unknown as C.SubmitInput;
         await assert.rejects(async () => await run(forged), C.ContractDefect);
         assert.equal(calls, before);

@@ -54,11 +54,11 @@ function responseContent(
   return lines(
     raw
       ? lines(
-          `if (${codecs}.Validate${outcome.name}(value.Value) is Result<Accepted<${c.use(use)}>, ContractFailure>.Failed) throw new InvalidOperationException("Invalid handler byte payload before wire output");`,
+          `if (${codecs}.Validate${outcome.name}(value.Value).IsFailed(out _, out _)) throw new InvalidOperationException("Invalid handler byte payload before wire output");`,
           `response.Content = new ReadOnlyMemoryContent(${bytes}.AsMemory());`,
         )
       : lines(
-          requireValue("string", `${codecs}.Encode${outcome.name}(value.Value, "http")`, "body"),
+          requireValue(`${codecs}.Encode${outcome.name}(value.Value, "http")`, "body"),
           "response.Content = new StringContent(body, Encoding.UTF8);",
         ),
     `response.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(${quote(mediaType)});`,
@@ -88,21 +88,12 @@ function httpResponse(c: CSharpContext, operation: Operation, outcome: Outcome):
 
 /** Outcome-to-envelope JSON output
  * @param operation - Operation
- * @param outcome - Outcome
  * @returns Statements that return the envelope text
  */
-function ipcResponse(operation: Operation, outcome: Outcome): string {
-  const tag = operation.ipc!.results.find((r) => r.outcome === outcome.name)!.tag;
+function ipcResponse(operation: Operation): string {
   return lines(
-    outcome.type &&
-      requireValue(
-        "string",
-        `${opName(operation, "OutcomeCodecs")}.Encode${outcome.name}(value.Value, "ipc")`,
-        "body",
-      ),
-    "using var stream = new MemoryStream();",
-    `using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); writer.WriteString("tag", ${quote(tag)}); ${outcome.type ? 'writer.WritePropertyName("body"); writer.WriteRawValue(body);' : ""} writer.WriteEndObject(); }`,
-    "return Encoding.UTF8.GetString(stream.ToArray());",
+    requireValue(`${opName(operation, "OutcomeCodecs")}.EncodeIpcEnvelope(value)`, "envelope"),
+    "return envelope;",
   );
 }
 
@@ -125,7 +116,7 @@ export function renderResponseMethods(
           throws: [["InvalidOperationException", "A handler payload that breaks the contract"]],
         }),
         `private static ${response} ${opName(operation, binding + "Response")}(${opName(operation, outcome.rejection ? "Rejection" : "Success")}.${name(pascal(outcome.name))} value) {`,
-        binding === "Http" ? httpResponse(c, operation, outcome) : ipcResponse(operation, outcome),
+        binding === "Http" ? httpResponse(c, operation, outcome) : ipcResponse(operation),
         "}",
       ),
     ),

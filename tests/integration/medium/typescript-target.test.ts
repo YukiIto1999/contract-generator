@@ -115,18 +115,32 @@ test(
     const payload =
       '{"requestId":"00000000-0000-0000-0000-000000000001","recordId":"00000000-0000-0000-0000-000000000002","correlationId":"00000000-0000-0000-0000-000000000003","label":"😀","count":1,"amount":"1.000","occurredAt":"2016-12-31T23:59:60.123456789012345Z","nullableText":null,"items":[{"kind":"text","text":"A","future":"not retained"}]}';
     const output = execFileSync(process.execPath, [join(root, "dist/driver.js"), "codec"], {
-      input: JSON.stringify({ type: "Envelope", payload }) + "\n",
+      input: [
+        { type: "Envelope", payload },
+        { type: "Envelope", payload: payload.replace('"text":"A"', '"text":"four"') },
+      ]
+        .map((request) => JSON.stringify(request) + "\n")
+        .join(""),
       encoding: "utf8",
       timeout: 30_000,
     });
-    const result = JSON.parse(output) as {
+    const [result, rejected] = output
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line)) as {
       accepted: boolean;
-      encoded: string;
+      encoded?: string;
       diagnostics: unknown[];
-    };
-    expect(result.accepted).toBe(true);
-    expect(result.diagnostics).toEqual([{ path: "/items/0", key: "future" }]);
-    expect(result.encoded).not.toContain("not retained");
+      violations: unknown[];
+    }[];
+    expect(result!.accepted).toBe(true);
+    expect(result!.diagnostics).toEqual([{ path: "/items/0", key: "future" }]);
+    expect(result!.encoded).not.toContain("not retained");
+    expect(rejected).toEqual({
+      accepted: false,
+      diagnostics: [{ path: "/items/0", key: "future" }],
+      violations: [{ path: "/items/0/text", rule: "maxLength" }],
+    });
   },
   projectTimeout,
 );

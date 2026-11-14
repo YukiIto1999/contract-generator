@@ -1,6 +1,6 @@
-import type { ContractModel, ContractType, TypeUse } from "../../model/contract-model.js";
+import type { ContractModel, ContractType } from "../../model/contract-model.js";
 import { acceptingTypes } from "./accepting.js";
-import { boxedUses } from "./layout.js";
+import { sharedObjects } from "./layout.js";
 
 /** Rust declaration context with stable resolved identities */
 export interface RustContext {
@@ -10,8 +10,8 @@ export interface RustContext {
   readonly nodes: ReadonlyMap<string, ContractType>;
   /** Cargo package prefix of the generated dependency units */
   readonly prefix: string;
-  /** Uses stored behind `Box` to give recursive declarations a finite size */
-  readonly boxed: ReadonlySet<TypeUse>;
+  /** Object identities with private shared payload storage */
+  readonly shared: ReadonlySet<string>;
   /** Input-reachable declarations that provider acceptance rebuilds to apply defaults */
   readonly accepting: ReadonlySet<string>;
 }
@@ -27,7 +27,7 @@ export function createContext(model: ContractModel, prefix: string): RustContext
     model,
     nodes,
     prefix,
-    boxed: boxedUses(model.types, nodes),
+    shared: sharedObjects(model.types, nodes),
     accepting: acceptingTypes(model, nodes),
   };
 }

@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use transport::CancellationToken;
 
 /// Generated client or provider invocation without fixture-side wire classification
-async fn invoke(request: Value, token: CancellationToken) -> Value {
+async fn invoke(request: Value, token: CancellationToken) -> String {
     let call = host::Call::open(&request, token).await;
     let result = contract::run(&call).await;
     call.finish().await;
@@ -44,11 +44,11 @@ async fn ipc_provider(reply: Value) {
     let mut input = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     let mut output = tokio::io::stdout();
     while let Some(line) = input.next_line().await.expect("native IPC request") {
-        let mut request: Value = types::parse_json(&line).expect("IPC request JSON");
+        let request: Value = serde_json::from_str(&line).expect("IPC command envelope JSON");
         let command = request["command"].as_str().expect("native command").to_owned();
-        let parameters = request["parameters"].take();
+        let parameters = request["parameters"].as_str().expect("raw JSON parameters").to_owned();
         let text = match provider::dispatch_ipc(&handler, &command, parameters, &token, None).await {
-            Ok(accepted) => accepted.value.to_string(),
+            Ok(accepted) => accepted.value,
             Err(failure) => host::failure_json(&failure).to_string(),
         };
         output.write_all(format!("{text}\n").as_bytes()).await.expect("IPC native result");
@@ -60,16 +60,16 @@ async fn ipc_provider(reply: Value) {
 type Commands = tokio::io::Lines<tokio::io::BufReader<tokio::io::Stdin>>;
 
 /// Observation of one invocation task; a panic in generated or fixture code is a contract defect
-fn observed(outcome: Result<Value, tokio::task::JoinError>) -> Value {
+fn observed(outcome: Result<String, tokio::task::JoinError>) -> String {
     match outcome {
         Ok(result) => result,
-        Err(error) if error.is_panic() => json!({"kind": "defect"}),
+        Err(error) if error.is_panic() => json!({"kind": "defect"}).to_string(),
         Err(_) => panic!("fixture task cancellation"),
     }
 }
 
 /// One call whose host cancellation is raised by a `{"cancel":true}` line arriving on the call protocol while it runs
-async fn cancellable(request: Value, commands: &mut Commands) -> Value {
+async fn cancellable(request: Value, commands: &mut Commands) -> String {
     let token = CancellationToken::new();
     let mut task = tokio::spawn(invoke(request, token.clone()));
     let mut reading = true;
@@ -106,7 +106,13 @@ async fn calls() {
 async fn main() {
     let mut args = std::env::args().skip(1);
     let mode = args.next();
-    let reply = args.next().map(|text| serde_json::from_str(&text).expect("reply JSON")).unwrap_or(Value::Null);
+    let reply = args.next().map(|mut text| {
+        if text == "-" {
+            text.clear();
+            std::io::stdin().read_line(&mut text).expect("provider configuration line");
+        }
+        serde_json::from_str(&text).expect("reply JSON")
+    }).unwrap_or(Value::Null);
     match mode.as_deref() {
         Some("http-provider") => http_provider(reply).await,
         Some("ipc-provider") => ipc_provider(reply).await,

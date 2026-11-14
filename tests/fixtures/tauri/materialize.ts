@@ -157,10 +157,17 @@ async function generate(checkout: Checkout): Promise<void> {
  */
 export async function materialize(checkout: Checkout): Promise<void> {
   await generate(checkout);
+  const typesRoot = await readFile(
+    join(checkout.execution.cwd, "generated/rust/types/src/lib.rs"),
+    "utf8",
+  );
+  const recursionLimit = typesRoot.match(/^#!\[recursion_limit = "\d+"\]/u)?.[0];
+  assert.ok(recursionLimit, "Generated types crate must declare its model-derived recursion limit");
+  const host = await readFile(join(checkout.fixture, "host.rs"), "utf8");
+  await file(checkout, "host/src/main.rs", `${recursionLimit}\n${host}`);
   await file(checkout, "host/Cargo.toml", manifest());
   await file(checkout, "host/build.rs", "fn main() { tauri_build::build() }\n");
   const sources = [
-    ["host.rs", "host/src/main.rs"],
     ["tauri.conf.json", "host/tauri.conf.json"],
     ["viewer.ts", "frontend/viewer.ts"],
     ["index.html", "frontend/index.html"],

@@ -35,16 +35,16 @@ internal static class OperationDriver
     private static async Task<int> Worker(string? peerFault)
     {
         string? line;
-        var runtime = new EffectRuntime<IContractHandlers>(new FixtureHandlers());
+        var clock = TimeProvider.System;
+        var diagnostics = new OperationDeadlineDiagnostics();
+        var runtime = new EffectRuntime<IContractHandlers>(new FixtureHandlers(), clock, diagnostics);
         while ((line = await Console.In.ReadLineAsync()) is not null)
         {
             if (peerFault is not null) return PeerFault(peerFault);
             using var request = JsonDocument.Parse(line);
             var root = request.RootElement;
-            DateTimeOffset? deadline = root.TryGetProperty("deadline", out var d) ? d.GetDateTimeOffset() : null;
-            using var deadlineSource = new CancellationTokenSource();
-            SetDeadline(deadlineSource, deadline);
-            var exit = await runtime.Run(ContractProvider.DispatchIpc(root.GetProperty("command").GetString()!, root.GetProperty("parameters").GetString()!, deadline), deadlineSource.Token);
+            var deadline = root.TryGetProperty("deadline", out var at) ? new Deadline(at.GetDateTimeOffset()) : Deadline.FromBudget(clock, TimeSpan.FromSeconds(30));
+            var exit = await runtime.Run(ContractProvider.DispatchIpc(root.GetProperty("command").GetString()!, root.GetProperty("parameters").GetString()!), deadline, _ => new ProviderFailure.Submit(new SubmitFailure.Communication(new("deadline"))), CancellationToken.None);
             if (exit is not EffectExit<ProviderFailure, string>.Succeeded response)
             {
                 Console.Error.WriteLine(Describe(Classify(exit)));
@@ -89,7 +89,9 @@ internal static class OperationDriver
         listener.Prefixes.Add(prefix);
         listener.Start();
         Console.WriteLine("ready");
-        var runtime = new EffectRuntime<IContractHandlers>(new FixtureHandlers());
+        var clock = TimeProvider.System;
+        var diagnostics = new OperationDeadlineDiagnostics();
+        var runtime = new EffectRuntime<IContractHandlers>(new FixtureHandlers(), clock, diagnostics);
         while (listener.IsListening)
         {
             var context = await listener.GetContextAsync();
@@ -106,7 +108,7 @@ internal static class OperationDriver
                 string[] values = context.Request.Headers.GetValues(key) ?? [];
                 if (!request.Headers.TryAddWithoutValidation(key, values)) request.Content?.Headers.TryAddWithoutValidation(key, values);
             }
-            var exit = await runtime.Run(ContractProvider.DispatchHttp(request, null), CancellationToken.None);
+            var exit = await runtime.Run(ContractProvider.DispatchHttp(request), Deadline.FromBudget(clock, TimeSpan.FromSeconds(30)), _ => new ProviderFailure.Submit(new SubmitFailure.Communication(new("deadline"))), CancellationToken.None);
             if (exit is EffectExit<ProviderFailure, HttpResponseMessage>.Succeeded succeeded)
             {
                 using var response = succeeded.Value;
@@ -136,18 +138,17 @@ internal static class OperationDriver
         string binding = request.TryGetProperty("binding", out var b) ? b.GetString()! : "direct";
         string payload = request.TryGetProperty("payload", out var p) ? p.GetString()! : "{}";
         var origin = new Uri(request.TryGetProperty("url", out var url) ? url.GetString()! : "http://127.0.0.1:1/");
-        DateTimeOffset? deadline = request.TryGetProperty("deadline", out var d) ? d.GetDateTimeOffset() : request.TryGetProperty("deadlineAfterMs", out var after) ? DateTimeOffset.UtcNow.AddMilliseconds(after.GetInt32()) : null;
+        var clock = TimeProvider.System;
+        var diagnostics = new OperationDeadlineDiagnostics();
+        var deadline = request.TryGetProperty("deadline", out var d) ? new Deadline(d.GetDateTimeOffset()) : Deadline.FromBudget(clock, request.TryGetProperty("deadlineAfterMs", out var after) ? TimeSpan.FromMilliseconds(after.GetInt32()) : TimeSpan.FromSeconds(30));
         using var parent = new CancellationTokenSource();
-        using var deadlineSource = new CancellationTokenSource();
-        SetDeadline(deadlineSource, deadline);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(parent.Token, deadlineSource.Token);
         string cancellation = request.TryGetProperty("cancel", out var cancel) ? cancel.GetString()! : "none";
         if (cancellation == "before") parent.Cancel();
         if (request.TryGetProperty("cancelAfterMs", out var milliseconds)) parent.CancelAfter(milliseconds.GetInt32());
         string? peer = request.TryGetProperty("ipcPeer", out var ipcPeer) ? ipcPeer.GetString() : null;
-        var consumer = new EffectRuntime<IClientRequirements>(new FixtureClientRequirements(client, origin, peer));
+        var consumer = new EffectRuntime<IClientRequirements>(new FixtureClientRequirements(client, origin, peer), clock, diagnostics);
         recorder.Reset();
-        var provider = new EffectRuntime<IContractHandlers>(new FixtureHandlers());
+        var provider = new EffectRuntime<IContractHandlers>(new FixtureHandlers(), clock, diagnostics);
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -155,54 +156,48 @@ internal static class OperationDriver
             if (operation == "submit")
             {
                 var input = SubmitInputCodec.Decode(payload, binding == "ipc" ? "ipc" : "http");
-                if (input is Result<Accepted<SubmitInput>, ContractFailure>.Failed invalid) InputFailure(writer, invalid.Failure);
+                if (input.IsFailed(out var invalid, out var accepted)) InputFailure(writer, invalid.Failure);
                 else
                 {
-                    var value = ((Result<Accepted<SubmitInput>, ContractFailure>.Succeeded)input).Value.Value;
+                    var value = accepted.Value;
                     var exit = binding == "direct"
-                        ? await provider.Run(ContractProvider.Submit(value, deadline), linked.Token)
-                        : await consumer.Run(binding == "ipc" ? ContractClient.SubmitIpc(value, deadline) : ContractClient.SubmitHttp(value, deadline), linked.Token);
+                        ? await provider.Run(ContractProvider.Submit(value), deadline, _ => new SubmitFailure.Communication(new("deadline")), parent.Token)
+                        : await consumer.Run(binding == "ipc" ? ContractClient.SubmitIpc(value) : ContractClient.SubmitHttp(value), deadline, _ => new SubmitFailure.Communication(new("deadline")), parent.Token);
                     if (cancellation == "after") parent.Cancel();
-                    SubmitExit(writer, exit, parent.IsCancellationRequested, deadlineSource.IsCancellationRequested);
+                    SubmitExit(writer, exit, parent.IsCancellationRequested);
                 }
             }
             else if (operation == "download")
             {
                 var input = DownloadInputCodec.Decode(payload, binding == "ipc" ? "ipc" : "http");
-                if (input is Result<Accepted<DownloadInput>, ContractFailure>.Failed invalid) InputFailure(writer, invalid.Failure);
+                if (input.IsFailed(out var invalid, out var accepted)) InputFailure(writer, invalid.Failure);
                 else
                 {
-                    var value = ((Result<Accepted<DownloadInput>, ContractFailure>.Succeeded)input).Value.Value;
+                    var value = accepted.Value;
                     var exit = binding == "direct"
-                        ? await provider.Run(ContractProvider.Download(value, deadline), linked.Token)
-                        : await consumer.Run(binding == "ipc" ? ContractClient.DownloadIpc(value, deadline) : ContractClient.DownloadHttp(value, deadline), linked.Token);
+                        ? await provider.Run(ContractProvider.Download(value), deadline, _ => new DownloadFailure.Communication(new("deadline")), parent.Token)
+                        : await consumer.Run(binding == "ipc" ? ContractClient.DownloadIpc(value) : ContractClient.DownloadHttp(value), deadline, _ => new DownloadFailure.Communication(new("deadline")), parent.Token);
                     if (cancellation == "after") parent.Cancel();
-                    DownloadExit(writer, exit, parent.IsCancellationRequested, deadlineSource.IsCancellationRequested);
+                    DownloadExit(writer, exit, parent.IsCancellationRequested);
                 }
             }
             else throw new InvalidOperationException("Unknown fixture operation");
-            if (binding == "http" && recorder.Seen) writer.WriteString("httpDeadline", recorder.Deadline is DateTimeOffset forwarded ? forwarded.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) : "none");
+            if (request.TryGetProperty("observeDeadline", out var observe) && observe.GetBoolean())
+            {
+                if (binding == "http" && recorder.Seen) writer.WriteString("httpDeadline", recorder.Deadline.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+                writer.WriteString("runtimeDeadline", deadline.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+                writer.WriteNumber("deadlineOverruns", diagnostics.Overruns.Count);
+            }
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
-    }
-
-    /// <summary>Host-owned deadline cancellation policy</summary>
-    /// <param name="source">Host deadline source</param>
-    /// <param name="deadline">Explicit absolute host deadline</param>
-    private static void SetDeadline(CancellationTokenSource source, DateTimeOffset? deadline)
-    {
-        if (deadline is not DateTimeOffset at) return;
-        TimeSpan remaining = at - DateTimeOffset.UtcNow;
-        if (remaining <= TimeSpan.Zero) source.Cancel(); else source.CancelAfter(remaining);
     }
 
     /// <summary>Typed submission result observation</summary>
     /// <param name="writer">Observation output</param>
     /// <param name="exit">Actual generated operation exit</param>
     /// <param name="parentCanceled">Host parent cancellation state</param>
-    /// <param name="deadlineCanceled">Host deadline cancellation state</param>
-    private static void SubmitExit(Utf8JsonWriter writer, EffectExit<SubmitFailure, SubmitSuccess> exit, bool parentCanceled, bool deadlineCanceled)
+    private static void SubmitExit(Utf8JsonWriter writer, EffectExit<SubmitFailure, SubmitSuccess> exit, bool parentCanceled)
     {
         if (exit is EffectExit<SubmitFailure, SubmitSuccess>.Succeeded success)
         {
@@ -225,15 +220,14 @@ internal static class OperationDriver
             else throw new InvalidOperationException("Invalid generated failure");
         }
         else if (exit is EffectExit<SubmitFailure, SubmitSuccess>.Defected defect) { writer.WriteString("exit", "defected"); writer.WriteString("defect", defect.Exception.GetType().Name); }
-        else { writer.WriteString("exit", "canceled"); writer.WriteString("reason", parentCanceled ? "parent" : deadlineCanceled ? "deadline" : "transport"); }
+        else { writer.WriteString("exit", "canceled"); writer.WriteString("reason", parentCanceled ? "parent" : "transport"); }
     }
 
     /// <summary>Typed binary result observation</summary>
     /// <param name="writer">Observation output</param>
     /// <param name="exit">Actual generated operation exit</param>
     /// <param name="parentCanceled">Host parent cancellation state</param>
-    /// <param name="deadlineCanceled">Host deadline cancellation state</param>
-    private static void DownloadExit(Utf8JsonWriter writer, EffectExit<DownloadFailure, DownloadSuccess> exit, bool parentCanceled, bool deadlineCanceled)
+    private static void DownloadExit(Utf8JsonWriter writer, EffectExit<DownloadFailure, DownloadSuccess> exit, bool parentCanceled)
     {
         if (exit is EffectExit<DownloadFailure, DownloadSuccess>.Succeeded success && success.Value is DownloadSuccess.Downloaded downloaded)
         {
@@ -247,7 +241,7 @@ internal static class OperationDriver
             else throw new InvalidOperationException("Invalid generated failure");
         }
         else if (exit is EffectExit<DownloadFailure, DownloadSuccess>.Defected defect) { writer.WriteString("exit", "defected"); writer.WriteString("defect", defect.Exception.GetType().Name); }
-        else { writer.WriteString("exit", "canceled"); writer.WriteString("reason", parentCanceled ? "parent" : deadlineCanceled ? "deadline" : "transport"); }
+        else { writer.WriteString("exit", "canceled"); writer.WriteString("reason", parentCanceled ? "parent" : "transport"); }
     }
 
     /// <summary>Positioned generated input failure observation</summary>
@@ -281,7 +275,9 @@ internal static class OperationDriver
             {
                 ProviderFailure.Submit { Failure: SubmitFailure.InvalidInput invalid } => invalid.Failure,
                 ProviderFailure.Download { Failure: DownloadFailure.InvalidInput invalid } => invalid.Failure,
-                _ => null,
+                ProviderFailure.Submit { Failure: SubmitFailure.Declared or SubmitFailure.Communication } => null,
+                ProviderFailure.Download { Failure: DownloadFailure.Declared or DownloadFailure.Communication } => null,
+                ProviderFailure.UnknownOperation => null,
             };
             if (input is not null) return new HostFailure("input", input);
             return new HostFailure(failed.Failure is ProviderFailure.UnknownOperation ? "unknown-operation" : "other", null);
@@ -332,13 +328,13 @@ internal sealed class DeadlineRecorder : DelegatingHandler
     public bool Seen { get; private set; }
     /// <summary>Observed host deadline</summary>
     /// <value>Absolute deadline forwarded by the generated client</value>
-    public DateTimeOffset? Deadline { get; private set; }
+    public Deadline Deadline { get; private set; }
 
     /// <summary>Recorder construction over the native network handler</summary>
     public DeadlineRecorder() : base(new HttpClientHandler()) { }
 
     /// <summary>Observation reset before one scenario</summary>
-    public void Reset() { Seen = false; Deadline = null; }
+    public void Reset() { Seen = false; Deadline = default; }
 
     /// <summary>Metadata observation before real network communication</summary>
     /// <param name="request">Generated native request</param>
@@ -350,4 +346,17 @@ internal sealed class DeadlineRecorder : DelegatingHandler
         Deadline = deadline;
         return base.SendAsync(request, cancellationToken);
     }
+}
+
+/// <summary>Concrete collection of fixture runtime deadline overruns</summary>
+internal sealed class OperationDeadlineDiagnostics : IDeadlineDiagnostics
+{
+    /// <summary>Recorded deadline observations</summary>
+    /// <value>Absolute deadlines paired with their observed overruns</value>
+    public List<(Deadline Deadline, TimeSpan Overrun)> Overruns { get; } = [];
+
+    /// <summary>Retention of a runtime deadline observation</summary>
+    /// <param name="deadline">Original execution deadline</param>
+    /// <param name="overrun">Observed positive overrun</param>
+    public void RecordOverrun(Deadline deadline, TimeSpan overrun) => Overruns.Add((deadline, overrun));
 }

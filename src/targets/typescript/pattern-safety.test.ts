@@ -4,13 +4,16 @@ import type { ContractModel, Constraints } from "../../model/contract-model.js";
 import { loadGenerated } from "./load-generated.js";
 import { member, objectType, scalarType } from "./model-builders.js";
 
-/** Located validation result with the existing accepted-value algebra */
+/** Rejection observations at the generated boundary */
+interface Rejection {
+  readonly violations: readonly { readonly path: string; readonly rule: string }[];
+  readonly diagnostics: readonly { readonly path: string; readonly key: string }[];
+}
+
+/** Located validation result with retained unknown-member observations */
 type Outcome = Result<
-  {
-    readonly value: unknown;
-    readonly diagnostics: readonly { readonly path: string; readonly key: string }[];
-  },
-  readonly { readonly path: string; readonly rule: string }[]
+  { readonly value: unknown; readonly diagnostics: Rejection["diagnostics"] },
+  Rejection
 >;
 
 /** Public generated codec entrypoints used by the finite adversarial corpus */
@@ -59,7 +62,11 @@ for (const entry of patterns) {
     for (const result of outcomes(codec, entry.yes)) expect(result.isOk()).toBe(true);
     for (const result of outcomes(codec, entry.no)) {
       expect(result.isErr()).toBe(true);
-      if (result.isErr()) expect(result.error).toEqual([{ path: "", rule: "format" }]);
+      if (result.isErr())
+        expect(result.error).toEqual({
+          violations: [{ path: "", rule: "format" }],
+          diagnostics: [],
+        });
     }
   });
 }
@@ -71,7 +78,11 @@ test.each([30, 1024, 16384, 65536])(
     for (const result of outcomes(codec, "a".repeat(length))) expect(result.isOk()).toBe(true);
     for (const result of outcomes(codec, "a".repeat(length) + "!")) {
       expect(result.isErr()).toBe(true);
-      if (result.isErr()) expect(result.error).toEqual([{ path: "", rule: "format" }]);
+      if (result.isErr())
+        expect(result.error).toEqual({
+          violations: [{ path: "", rule: "format" }],
+          diagnostics: [],
+        });
     }
   },
 );
@@ -91,7 +102,8 @@ test.each([
   const codec = loadGenerated(model).contract.Text as Codec;
   for (const result of outcomes(codec, "a".repeat(30) + "!")) {
     expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error).toEqual([{ path: "", rule }]);
+    if (result.isErr())
+      expect(result.error).toEqual({ violations: [{ path: "", rule }], diagnostics: [] });
   }
 });
 
@@ -120,10 +132,13 @@ test.each(cheapCases)(
     for (const result of outcomes(codec, { first: input, second: "!", future: true })) {
       expect(result.isErr()).toBe(true);
       if (result.isErr())
-        expect(result.error).toEqual([
-          { path: "/first", rule },
-          { path: "/second", rule: "format" },
-        ]);
+        expect(result.error).toEqual({
+          violations: [
+            { path: "/first", rule },
+            { path: "/second", rule: "format" },
+          ],
+          diagnostics: [{ path: "", key: "future" }],
+        });
     }
   },
 );
@@ -138,7 +153,11 @@ test("rejected replacement neither mutates the accepted value nor changes unknow
   expect(Object.isFrozen(accepted.value)).toBe(true);
   for (const result of outcomes(codec, { value: "a".repeat(16384) + "!", future: true })) {
     expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error).toEqual([{ path: "/value", rule: "format" }]);
+    if (result.isErr())
+      expect(result.error).toEqual({
+        violations: [{ path: "/value", rule: "format" }],
+        diagnostics: [{ path: "", key: "future" }],
+      });
   }
   expect(accepted.value).toEqual({ value: "a" });
 });

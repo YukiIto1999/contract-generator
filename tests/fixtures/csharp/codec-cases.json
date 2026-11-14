@@ -41,12 +41,12 @@
   {
     "input": { "type": "ShortLabel", "payload": "\"\\ud800\"" },
     "accepted": false,
-    "violations": [{ "path": "", "rule": "format" }]
+    "violations": [{ "path": "", "rule": "json" }]
   },
   {
     "input": { "type": "ShortLabel", "payload": "\"\\ude00\"" },
     "accepted": false,
-    "violations": [{ "path": "", "rule": "format" }]
+    "violations": [{ "path": "", "rule": "json" }]
   },
   {
     "input": { "type": "ShortLabel", "payloadUnits": [34, 55296, 34] },

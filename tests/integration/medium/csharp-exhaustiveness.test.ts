@@ -57,15 +57,15 @@ nativeTest("fails consumer compilation when any public closed family omits a var
   }
 });
 
-nativeTest("rejects a consumer closed-type switch statement with TYPMOD001 as an error", () => {
+nativeTest("rejects a consumer catchall that hides future closed cases with TYPMOD021", () => {
   const build = buildCSharpProject(contract.fixture(), "ExhaustivenessProbe.csproj", {
-    Probe: "ClosedStatement",
+    Probe: "FutureChoice",
   });
   expect(build.status, build.output).not.toBe(0);
   expect(
     generatedDiagnostics(build).map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
     build.output,
-  ).toEqual(["error TYPMOD001"]);
+  ).toEqual(["error TYPMOD021"]);
 });
 
 nativeTest("rejects an unconstructed consumer Effect with EFFSYS008 as an error", () => {
@@ -78,3 +78,19 @@ nativeTest("rejects an unconstructed consumer Effect with EFFSYS008 as an error"
     build.output,
   ).toEqual(["error EFFSYS008"]);
 });
+
+for (const [probe, diagnostic] of [
+  ["CompetingDeadlineTimer", "EFFSYS014"],
+  ["ReconstructedDeadline", "EFFSYS015"],
+] as const) {
+  nativeTest(`rejects consumer deadline misuse ${probe} with ${diagnostic} as an error`, () => {
+    const build = buildCSharpProject(contract.fixture(), "ExhaustivenessProbe.csproj", {
+      Probe: probe,
+    });
+    expect(build.status, build.output).not.toBe(0);
+    expect(
+      generatedDiagnostics(build).map((entry) => `${entry.severity} ${entry.code}`),
+      build.output,
+    ).toEqual([`error ${diagnostic}`]);
+  });
+}

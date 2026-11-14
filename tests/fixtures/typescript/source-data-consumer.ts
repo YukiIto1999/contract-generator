@@ -50,7 +50,10 @@ function sourceDataChecks(): readonly Check[] {
       () => {
         for (const lookalike of expected.lookalikes) {
           const result = C.Flavor.decode(JSON.stringify(lookalike));
-          assert.deepEqual(result.isErr() && result.error, [{ path: "", rule: "literal" }]);
+          assert.deepEqual(result.isErr() && result.error, {
+            violations: [{ path: "", rule: "literal" }],
+            diagnostics: [],
+          });
         }
       },
     ],

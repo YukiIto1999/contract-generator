@@ -592,7 +592,6 @@ dependencies = [
  "desktop-probe-types",
  "http-body-util",
  "percent-encoding",
- "serde_json",
  "url",
 ]
 
@@ -601,7 +600,6 @@ name = "desktop-probe-transport"
 version = "0.1.0"
 dependencies = [
  "desktop-probe-types",
- "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -613,6 +611,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "json-event-parser",
  "num-bigint",
  "regex",
  "serde",
@@ -1698,6 +1697,12 @@ dependencies = [
  "futures-util",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "json-event-parser"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "574b0cd5e90ee2ba03a66d0611fc9a09c9a0c28b2ecc2dc8a181dd31a53ca5d7"
 
 [[package]]
 name = "json-patch"

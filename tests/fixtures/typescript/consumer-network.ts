@@ -105,7 +105,24 @@ export function networkChecks(fixture: Values): readonly Check[] {
       async () => {
         const peer = processTransport();
         try {
-          const client = createIpcClient({ transport: peer.transport });
+          let calls = 0;
+          const client = createIpcClient({
+            transport: {
+              request(command, parametersJson, context) {
+                calls++;
+                return peer.transport.request(command, parametersJson, context);
+              },
+            },
+          });
+          const forged = {
+            input: { ...fixture.value, requestId: "not-a-uuid" },
+            secret: { private: "never retain" },
+          } as unknown as C.SubmitInput;
+          await assert.rejects(
+            async () => await client.submit(forged)(undefined, signal, Infinity),
+            C.ContractDefect,
+          );
+          assert.equal(calls, 0);
           const defaulted = await client.submit(fixture.input)(undefined, signal, 77777);
           assert.equal(
             defaulted.isOk() && defaulted.value.case !== "Completed" && defaulted.value.value.value,

@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { CSharpContext } from "./context.js";
-import { acceptanceNodes } from "./provider-defaults.js";
+import { acceptanceNodes } from "./provider-default-plan.js";
 import {
   arrayOf,
   field,

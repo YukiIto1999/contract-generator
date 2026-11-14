@@ -7,6 +7,7 @@ export const rustMinimumVersion = "1.94.0";
 export const rustDependencies = {
   serde: "1.0.229",
   serde_json: "1.0.151",
+  json_event_parser: "0.2.3",
   num_bigint: "0.4.8",
   base64: "0.22.1",
   bytes: "1.12.1",
@@ -64,7 +65,7 @@ export function rustManifests(prefix: string): readonly GeneratedFile[] {
       content: manifest(
         prefix,
         "types",
-        `serde = { version = "=${d.serde}", features = ["derive"] }\nserde_json = { version = "=${d.serde_json}", features = ["arbitrary_precision", "raw_value"] }\nnum-bigint = "=${d.num_bigint}"\nbase64 = "=${d.base64}"\nbytes = "=${d.bytes}"\nthiserror = "=${d.thiserror}"\nregex = "=${d.regex}"`,
+        `serde = { version = "=${d.serde}", features = ["derive"] }\n${json}\njson-event-parser = "=${d.json_event_parser}"\nnum-bigint = "=${d.num_bigint}"\nbase64 = "=${d.base64}"\nbytes = "=${d.bytes}"\nthiserror = "=${d.thiserror}"\nregex = "=${d.regex}"`,
       ),
     },
     {
@@ -72,7 +73,7 @@ export function rustManifests(prefix: string): readonly GeneratedFile[] {
       content: manifest(
         prefix,
         "transport",
-        `${prefix}-types = { path = "../types" }\n${json}\nthiserror = "=${d.thiserror}"\ntokio = { version = "=${d.tokio}", features = ["time"] }\ntokio-util = { version = "=${d.tokio_util}", features = ["rt"] }`,
+        `${prefix}-types = { path = "../types" }\nthiserror = "=${d.thiserror}"\ntokio = { version = "=${d.tokio}", features = ["time"] }\ntokio-util = { version = "=${d.tokio_util}", features = ["rt"] }`,
       ),
     },
     {
@@ -80,7 +81,7 @@ export function rustManifests(prefix: string): readonly GeneratedFile[] {
       content: manifest(
         prefix,
         "provider",
-        `${own}\n${json}\naxum = "=${d.axum}"\nhttp-body-util = "=${d.http_body_util}"\nurl = "=${d.url}"\npercent-encoding = "=${d.percent_encoding}"`,
+        `${own}\naxum = "=${d.axum}"\nhttp-body-util = "=${d.http_body_util}"\nurl = "=${d.url}"\npercent-encoding = "=${d.percent_encoding}"`,
       ),
     },
     {
@@ -88,7 +89,7 @@ export function rustManifests(prefix: string): readonly GeneratedFile[] {
       content: manifest(
         prefix,
         "client",
-        `${own}\n${json}\nreqwest = { version = "=${d.reqwest}", default-features = false, features = ["rustls"] }\ntokio = { version = "=${d.tokio}", features = ["macros"] }\nbytes = "=${d.bytes}"\nurl = "=${d.url}"`,
+        `${own}\nreqwest = { version = "=${d.reqwest}", default-features = false, features = ["rustls"] }\ntokio = { version = "=${d.tokio}", features = ["macros"] }\nbytes = "=${d.bytes}"\nurl = "=${d.url}"`,
       ),
     },
   ];

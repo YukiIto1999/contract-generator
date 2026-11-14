@@ -20,14 +20,16 @@ impl ProcessTransport {
     pub async fn start(reply: &Value) -> Self {
         let mut child = tokio::process::Command::new(std::env::current_exe().expect("fixture executable"))
             .arg("ipc-provider")
-            .arg(reply.to_string())
+            .arg("-")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
             .expect("separate IPC provider");
-        let stdin = child.stdin.take().expect("provider stdin");
+        let mut stdin = child.stdin.take().expect("provider stdin");
+        stdin.write_all(format!("{reply}\n").as_bytes()).await.expect("provider configuration");
+        stdin.flush().await.expect("provider configuration flush");
         let stdout = child.stdout.take().expect("provider stdout");
         let stdout = tokio::io::BufReader::new(stdout).lines();
         Self { state: tokio::sync::Mutex::new(ProcessState { child, stdin, stdout }) }
@@ -42,7 +44,7 @@ impl ProcessTransport {
 }
 
 impl IpcTransport for ProcessTransport {
-    async fn invoke(&self, command: &str, parameters: Value, token: &CancellationToken, deadline: Option<Instant>) -> Result<Value, CommunicationFailure> {
+    async fn invoke(&self, command: &str, parameters: String, token: &CancellationToken, deadline: Option<Instant>) -> Result<String, CommunicationFailure> {
         if token.is_cancelled() {
             return Err(CommunicationFailure::Cancelled);
         }
@@ -53,7 +55,7 @@ impl IpcTransport for ProcessTransport {
                 state.stdin.write_all(line.as_bytes()).await.map_err(|_| CommunicationFailure::Failed)?;
                 state.stdin.flush().await.map_err(|_| CommunicationFailure::Failed)?;
                 let line = state.stdout.next_line().await.map_err(|_| CommunicationFailure::Failed)?.ok_or(CommunicationFailure::Failed)?;
-                Ok(types::parse_json(&line).expect("IPC provider emitted a malformed native result"))
+                Ok(line)
             };
             let timer = async {
                 match deadline {
@@ -195,8 +197,8 @@ impl Call {
 }
 
 /// Observation of a rejected client input before any call
-pub fn invalid(error: types::ValidationFailure) -> Value {
-    json!({"kind": "invalidInput", "violations": error.violations, "diagnostics": error.diagnostics})
+pub fn invalid(error: types::ValidationFailure) -> String {
+    json!({"kind": "invalidInput", "violations": error.violations, "diagnostics": error.diagnostics}).to_string()
 }
 
 /// Observation of a client result as protocol JSON: each arm yields kind, outcome, body, void flag and diagnostics
@@ -205,29 +207,29 @@ macro_rules! observe {
     ($result:expr, $($pattern:pat => $observation:expr),+ $(,)?) => {
         match $result {
             $($pattern => {
-                let (kind, outcome, body, void, diagnostics): (&str, &str, serde_json::Value, bool, Vec<types::Diagnostic>) = $observation;
-                serde_json::json!({"kind": kind, "outcome": outcome, "body": body, "void": void, "diagnostics": diagnostics})
+                let (kind, outcome, body, void, diagnostics): (&str, &str, String, bool, Vec<types::Diagnostic>) = $observation;
+                format!("{{\"kind\":{},\"outcome\":{},\"body\":{},\"void\":{},\"diagnostics\":{}}}", serde_json::to_string(kind).expect("fixture kind"), serde_json::to_string(outcome).expect("fixture outcome"), body, void, serde_json::to_string(&diagnostics).expect("fixture diagnostics"))
             })+
-            Err(transport::OperationFailure::Communication) => serde_json::json!({"kind": "communication"}),
-            Err(transport::OperationFailure::Cancelled) => serde_json::json!({"kind": "cancelled"}),
-            Err(transport::OperationFailure::DeadlineExceeded) => serde_json::json!({"kind": "deadlineExceeded"}),
+            Err(transport::OperationFailure::Communication) => String::from("{\"kind\":\"communication\"}"),
+            Err(transport::OperationFailure::Cancelled) => String::from("{\"kind\":\"cancelled\"}"),
+            Err(transport::OperationFailure::DeadlineExceeded) => String::from("{\"kind\":\"deadlineExceeded\"}"),
         }
     };
 }
 
 /// Adapter reply for one operation; a held reply never answers and ends only by cancellation, which yields none
-pub async fn configured(reply: &Value, operation: &str, token: &CancellationToken) -> Option<(String, Value)> {
+pub async fn configured(reply: &Value, operation: &str, token: &CancellationToken) -> Option<(String, String)> {
     if reply["hold"] == true {
         token.cancelled().await;
         return None;
     }
     let reply = reply.get(operation).unwrap_or(reply);
-    Some((reply["outcome"].as_str().expect("explicit configured outcome").to_owned(), reply["body"].clone()))
+    Some((reply["outcome"].as_str().expect("explicit configured outcome").to_owned(), reply["bodyJson"].as_str().map(str::to_owned).unwrap_or_else(|| reply["body"].to_string())))
 }
 
 /// Adapter acceptance observation on stderr, separate from the response protocol
-pub fn record(operation: &str, accepted: Value) {
-    eprintln!("{}", json!({"operation": operation, "accepted": accepted}));
+pub fn record(operation: &str, accepted: String) {
+    eprintln!("{{\"operation\":{},\"accepted\":{}}}", serde_json::to_string(operation).expect("fixture operation"), accepted);
 }
 
 /// Value from a generated codec that the configured fixture response must satisfy

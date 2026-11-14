@@ -112,7 +112,7 @@ function literal(text: string): string {
   return `"${text.replace(/[\\"$\r\n]/g, (character) => escapes[character] ?? character)}"`;
 }
 
-/** TypeSpec source of a contract whose descriptions, wire name, closed values and discriminator tag are hostile text for generated source
+/** TypeSpec source of a contract whose descriptions, wire names, HTTP placements, closed values and discriminator tag are hostile text for generated source
  * @param libraryImport - Import path of the profile library from the compiled source path
  * @returns Contract text in the namespace `SourceData`
  */
@@ -146,5 +146,11 @@ export function hostileContract(libraryImport: string): string {
     ...fields,
     `  @encodedName("application/json", ${literal(wireName)}) bare: string;`,
     "}",
+    "@outcomes union Observed { observed: void }",
+    `op echo(@encodedName("application/json", ${literal(wireName)}) value: string): Observed;`,
+    '@@publish(echo, #["http"]);',
+    '@@httpBinding(echo, "GET", "/echo", "-");',
+    '@@httpParameter(echo, "value", "query", "v");',
+    '@@httpResult(echo, "observed", 204);',
   ].join("\n");
 }

@@ -14,10 +14,23 @@ const syntaxViolations: readonly Violation[] = Object.freeze([Object.freeze({ pa
  * JSON pointer extension
  * @param path - Containing location
  * @param key - Unescaped segment
+ * @returns Deferred RFC 6901 location
+ */
+function pointer(path: Path, key: string | number): Path {
+  return { parent: path, key };
+}
+
+/**
+ * Observation-only RFC 6901 materialization
+ * @param path - Deferred location
  * @returns RFC 6901 location
  */
-function pointer(path: string, key: string | number): string {
-  return path + "/" + String(key).replace(/~/g, "~0").replace(/\//g, "~1");
+function location(path: Path): string {
+  const segments: string[] = [];
+  for (let current = path; current !== undefined; current = current.parent) {
+    segments.push(String(current.key).replace(/~/g, "~0").replace(/\//g, "~1"));
+  }
+  return segments.length === 0 ? "" : "/" + segments.reverse().join("/");
 }
 
 /**
@@ -27,8 +40,8 @@ function pointer(path: string, key: string | number): string {
  * @param rule - Semantic rule identity
  * @returns Invalid sentinel
  */
-function invalid(state: State, path: string, rule: string): undefined {
-  state.violations.push(Object.freeze({ path, rule }));
+function invalid(state: State, path: Path, rule: string): undefined {
+  state.violations.push(Object.freeze({ path: location(path), rule }));
   return undefined;
 }
 
@@ -54,7 +67,7 @@ function objectValue(value: unknown): value is Record<string, unknown> {
  * @param state - Current call
  * @returns Whether the candidate is an object that may be read now
  */
-function enterObject(value: unknown, path: string, state: State): value is Record<string, unknown> {
+function enterObject(value: unknown, path: Path, state: State): value is Record<string, unknown> {
   if (!objectValue(value) || state.active.has(value)) {
     invalid(state, path, "type");
     return false;
@@ -70,7 +83,7 @@ function enterObject(value: unknown, path: string, state: State): value is Recor
  * @param state - Current call
  * @returns Whether the candidate is an array that may be read now
  */
-function enterArray(value: unknown, path: string, state: State): value is readonly unknown[] {
+function enterArray(value: unknown, path: Path, state: State): value is readonly unknown[] {
   if (!Array.isArray(value) || state.active.has(value)) {
     invalid(state, path, "type");
     return false;
@@ -124,9 +137,9 @@ function known(value: unknown, id: string): boolean {
  * @param state - Current call
  * @param allowed - Declared member names of the read origin
  */
-function reportUnknown(value: Record<string, unknown>, path: string, state: State, allowed: readonly string[]): void {
+function reportUnknown(value: Record<string, unknown>, path: Path, state: State, allowed: readonly string[]): void {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) state.diagnostics.push(Object.freeze({ path, key }));
+    if (!allowed.includes(key)) state.diagnostics.push(Object.freeze({ path: location(path), key }));
   }
 }
 
@@ -230,7 +243,7 @@ function expectedInputError(cause: unknown): Error {
  * @param selected - Selected binding encoding
  * @returns Owned bytes or the invalid sentinel
  */
-function readBytes(value: unknown, path: string, state: State, mode: Mode, selected: string): ByteSequence | undefined {
+function readBytes(value: unknown, path: Path, state: State, mode: Mode, selected: string): ByteSequence | undefined {
   if (mode === "local" && typeof value === "object" && value !== null && byteStorage.has(value)) return value as ByteSequence;
   if (mode === "constant") {
     const owned = constantBytes(value);
@@ -260,7 +273,7 @@ function writeBytes(value: ByteSequence, selected: string): string {
  * @param selected - Selected binding encoding
  * @returns Boolean or the invalid sentinel
  */
-function readBoolean(value: unknown, path: string, state: State, selected: string): boolean | undefined {
+function readBoolean(value: unknown, path: Path, state: State, selected: string): boolean | undefined {
   if (selected === "string") {
     if (value === "true") return true;
     return value === "false" ? false : invalid(state, path, "type");

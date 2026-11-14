@@ -3,21 +3,14 @@ import type { CSharpContext } from "./context.js";
 import { lines, name, pascal, quote } from "./naming.js";
 import { familyName, opName } from "./outcome-codecs.js";
 
-/** Result expression type of a client operation
- * @param operation - Operation
- * @returns Closed result type with the success and failure families
- */
-function resultType(operation: Operation): string {
-  return `Result<${opName(operation, "Success")}, ${opName(operation, "Failure")}>`;
-}
-
 /** Communication failure returned to the caller
  * @param operation - Operation
  * @param reason - Stable host-visible reason
  * @returns Return statement
  */
 export function communicationReturn(operation: Operation, reason: string): string {
-  return `return new ${resultType(operation)}.Failed(new ${opName(operation, "Failure")}.Communication(new(${quote(reason)})));`;
+  const failure = opName(operation, "Failure");
+  return `return Result.Failed<${failure}>(new ${failure}.Communication(new(${quote(reason)})));`;
 }
 
 /** Mismatch classification of a relayed or direct response
@@ -45,11 +38,11 @@ export function mismatch(
  * @returns Return statement over `accepted`
  */
 function completedReturn(operation: Operation, outcome: Outcome): string {
-  const result = resultType(operation);
+  const success = opName(operation, "Success");
   const failure = opName(operation, "Failure");
   return outcome.rejection
-    ? `return new ${result}.Failed(new ${failure}.Declared(accepted.Value.Value));`
-    : `return new ${result}.Succeeded(accepted.Value.Value);`;
+    ? `return Result.Failed<${failure}>(new ${failure}.Declared(accepted.Value));`
+    : `return Result.Succeeded<${success}>(accepted.Value);`;
 }
 
 /** Outcome completion from payload text of the selected result
@@ -71,12 +64,12 @@ export function decodeOutcome(
   if (!outcome.type)
     return lines(
       `var completed = ${family}.${name(pascal(outcome.name))}.Create();`,
-      `if (completed is not Result<Accepted<${family}>, ContractFailure>.Succeeded accepted) throw new InvalidOperationException("Invalid generated outcome completion");`,
+      `if (completed.IsFailed(out _, out var accepted)) throw new InvalidOperationException("Invalid generated outcome completion");`,
       completedReturn(operation, outcome),
     );
   return lines(
     `var completed = ${opName(operation, "OutcomeCodecs")}.Decode${outcome.name}Result(${body}, ${quote(binding)});`,
-    `if (completed is not Result<Accepted<${family}>, ContractFailure>.Succeeded accepted) { ${mismatch(operation, "gateway-response-mismatch", "Response payload contract mismatch", gateway)} }`,
+    `if (completed.IsFailed(out _, out var accepted)) { ${mismatch(operation, "gateway-response-mismatch", "Response payload contract mismatch", gateway)} }`,
     completedReturn(operation, outcome),
   );
 }
@@ -95,10 +88,9 @@ export function binaryOutcome(c: CSharpContext, operation: Operation, outcome: O
   const invalid = `{ ${mismatch(operation, "gateway-body-mismatch", "Invalid binary response")} }`;
   return lines(
     role && `var rawValue = ${c.codec(use.id)}.Create(ImmutableArray.CreateRange(bytes));`,
-    role &&
-      `if (rawValue is not Result<Accepted<${c.type(use.id)}>, ContractFailure>.Succeeded raw) ${invalid}`,
-    `var completed = ${family}.${name(pascal(outcome.name))}.Create(${role ? "raw.Value.Value" : "ImmutableArray.CreateRange(bytes)"});`,
-    `if (completed is not Result<Accepted<${family}>, ContractFailure>.Succeeded accepted) ${invalid}`,
+    role && `if (rawValue.IsFailed(out _, out var raw)) ${invalid}`,
+    `var completed = ${family}.${name(pascal(outcome.name))}.Create(${role ? "raw.Value" : "ImmutableArray.CreateRange(bytes)"});`,
+    `if (completed.IsFailed(out _, out var accepted)) ${invalid}`,
     completedReturn(operation, outcome),
   );
 }

@@ -58,9 +58,7 @@ if (mode === "self-test") {
     const codec = selectedCodec(request.type ?? "Envelope");
     const result = codec.decode(request.payload!);
     if (result.isErr()) {
-      process.stdout.write(
-        JSON.stringify({ accepted: false, diagnostics: [], violations: result.error }) + "\n",
-      );
+      process.stdout.write(JSON.stringify({ accepted: false, ...result.error }) + "\n");
       continue;
     }
     const encoded = codec.encode(result.value.value);

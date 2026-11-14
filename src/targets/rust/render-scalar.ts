@@ -51,7 +51,7 @@ function construct(p: ScalarPlan): string {
   const wrapped = p.role === undefined ? "value" : `${p.role}(value)`;
   return p.checks === ""
     ? `State::default().finish(Some(${wrapped}))`
-    : `let mut state = State::default(); ${p.role === undefined ? "" : `let value = ${wrapped};`} _check_${p.id}(&value, "", &mut state); state.finish(Some(value))`;
+    : `let mut state = State::default(); ${p.role === undefined ? "" : `let value = ${wrapped};`} _check_${p.id}(&value, 0, &mut state); state.finish(Some(value))`;
 }
 
 /** Public type and constructor of a scalar declaration
@@ -112,7 +112,8 @@ function parseFunction(type: ScalarType, p: ScalarPlan, name: string): string {
 /// - path: diagnostic pointer
 /// - state: incomplete graph state
 /// - Return: storage candidate in its role
-fn ${name}${p.id}(value: Value, ${aware ? "binding" : "_binding"}: Binding, ${aware ? "encoding" : "_encoding"}: Option<&str>, path: &str, state: &mut State) -> Option<${type.name}> {
+fn ${name}${p.id}(json: &mut _Json, node: usize, ${aware ? "binding" : "_binding"}: Binding, ${aware ? "encoding" : "_encoding"}: Option<&str>, path: _Path, state: &mut State) -> Option<${type.name}> {
+    let value = json.take(node);
     ${aware ? `let encoding = ${encodingChoice(type)};` : ""}
     ${body}
 }
@@ -131,7 +132,7 @@ function checkedFunctions(type: ScalarType, p: ScalarPlan): string {
 /// - value: storage candidate in its role
 /// - path: diagnostic pointer
 /// - state: incomplete graph state
-fn _check_${p.id}(value: &${type.name}, path: &str, state: &mut State) {
+fn _check_${p.id}(value: &${type.name}, path: _Path, state: &mut State) {
     ${p.checks}
 }
 /// Internal scalar decoding with validation
@@ -142,8 +143,8 @@ fn _check_${p.id}(value: &${type.name}, path: &str, state: &mut State) {
 /// - path: diagnostic pointer
 /// - state: incomplete graph state
 /// - Return: validated candidate
-fn _decode_${p.id}(value: Value, binding: Binding, encoding: Option<&str>, path: &str, state: &mut State) -> Option<${type.name}> {
-    let value = _parse_${p.id}(value, binding, encoding, path, state)?;
+fn _decode_${p.id}(json: &mut _Json, node: usize, binding: Binding, encoding: Option<&str>, path: _Path, state: &mut State) -> Option<${type.name}> {
+    let value = _parse_${p.id}(json, node, binding, encoding, path, state)?;
     _check_${p.id}(&value, path, state);
     Some(value)
 }
@@ -162,8 +163,8 @@ function encodeFunction(type: ScalarType, p: ScalarPlan): string {
 /// - value: validated storage reference
 /// - binding: wire selection
 /// - encoding: use-site override
-/// - Return: owned wire token
-fn _encode_${p.id}(value: &${type.name}, ${aware ? "binding" : "_binding"}: Binding, ${aware ? "encoding" : "_encoding"}: Option<&str>) -> Value {
+/// - writer: unpublished JSON event output
+fn _write_${p.id}(value: &${type.name}, ${aware ? "binding" : "_binding"}: Binding, ${aware ? "encoding" : "_encoding"}: Option<&str>, writer: &mut _JsonWriter) {
     ${aware ? `let encoding = ${encodingChoice(type)};` : ""}
     ${type.role === null ? "" : "let value = &value.0;"}
     ${p.codec.encode}
@@ -181,7 +182,7 @@ export function renderScalar(ctx: RustContext, type: ScalarType): string {
   const guard =
     type.role !== type.id && p.checks !== ""
       ? asserted(
-          `_check_${p.id}(value, "", state);`,
+          `_check_${p.id}(value, 0, state);`,
           `invalid ${type.name} value at the encode boundary`,
         )
       : "";

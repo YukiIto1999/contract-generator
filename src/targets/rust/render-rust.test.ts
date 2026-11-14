@@ -90,6 +90,26 @@ test("refuses a declaration that collides with a generated name and addresses it
   ]);
 });
 
+test("does not reserve private parser spellings or removed DOM names", () => {
+  const model = contract(
+    ["Json", "JsonNode", "JsonWriter", "Path", "Value", "Map"].map((name) => text(name)),
+    [],
+    [],
+  );
+  expect(refusals(model)).toEqual([]);
+});
+
+test("refuses a public HTTP projection type that collides with a canonical declaration", () => {
+  const model = contract(
+    [text("Text"), text("SendHttpPlacements")],
+    [operation("send", "Text")],
+    ["Text"],
+  );
+  expect(refusals(model)).toContain(
+    "rust-unsupported@1: Rust operation declaration SendHttpPlacements collides with another generated declaration",
+  );
+});
+
 test("refuses a unix timestamp encoding that cannot keep the temporal profile", () => {
   const model = contract([text("Stamp", "unixTimestamp")], [], []);
   expect(refusals(model).join("\n")).toContain("Unix timestamp encoding cannot preserve");

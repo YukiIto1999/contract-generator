@@ -20,15 +20,6 @@ fn single_header<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Opt
 `,
   ),
   support(
-    "parameter_text",
-    String.raw`/// Exact scalar HTTP parameter text
-///
-/// - value: encoded scalar token
-/// - Return: scalar wire spelling
-fn parameter_text(value: Value) -> String { match value { Value::String(value) => value, value => value.to_string() } }
-`,
-  ),
-  support(
     "path_segment",
     String.raw`/// Percent encoding of a single path parameter
 ///
@@ -134,7 +125,6 @@ export function renderClient(ctx: RustContext): string {
   const body = `//! Deferred contract consumers over real HTTP and injected IPC
 use ${prefix}_types::*;
 pub use ${prefix}_transport::*;
-use serde_json::Value;
 use std::future::Future;
 ${httpTransport}${operations}`;
   return body + reachable(body, clientSupport);

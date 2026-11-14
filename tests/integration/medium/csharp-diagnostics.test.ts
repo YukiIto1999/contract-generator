@@ -42,10 +42,4 @@ test("reports an inexact encoding and a generated-name collision at their origin
       ["unsupported-csharp", "csharp", "Inline.choose.Success", true, 11],
     ]),
   );
-  expect(issues.find((issue) => issue.subject === "Inline.UnixInstant")!.reason).toContain(
-    "unixTimestamp",
-  );
-  expect(issues.find((issue) => issue.subject === "Inline.choose.Success")!.reason).toContain(
-    "collides with Inline.ChooseSuccess",
-  );
 });

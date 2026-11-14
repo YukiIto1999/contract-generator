@@ -1,8 +1,9 @@
-import * as results from "ts-results-es";
-import * as losslessJson from "lossless-json";
-import * as base from "@scure/base";
 import * as re2js from "re2js";
 import { runInThisContext } from "node:vm";
+import * as base from "@scure/base";
+import * as streamparser from "@streamparser/json";
+import * as losslessJson from "lossless-json";
+import * as results from "ts-results-es";
 import ts from "typescript";
 import type { ContractModel, EmissionOptions, GeneratedFile } from "../../model/contract-model.js";
 import { renderTypeScript } from "./render-typescript.js";
@@ -42,6 +43,7 @@ const dependencies: Readonly<Record<string, LoadedModule>> = {
   "ts-results-es": results,
   "lossless-json": losslessJson,
   "@scure/base": base,
+  "@streamparser/json": streamparser,
   re2js,
 };
 

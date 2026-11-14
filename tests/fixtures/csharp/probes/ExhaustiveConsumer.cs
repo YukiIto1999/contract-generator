@@ -18,15 +18,15 @@ internal static class ExhaustiveConsumer
             using (var writer = new Utf8JsonWriter(stream))
             {
                 writer.WriteStartObject();
-                writer.WriteString("choice", ChoiceCodec.Decode(request.RootElement.GetProperty("choice").GetRawText()) switch
+                writer.WriteString("choice", ChoiceCodec.Decode(request.RootElement.GetProperty("choice").GetRawText()).Value switch
                 {
-                    Result<Accepted<Choice>, ContractFailure>.Succeeded accepted => ChoiceName(accepted.Value.Value),
-                    Result<Accepted<Choice>, ContractFailure>.Failed => "rejected",
+                    Succeeded<Accepted<Choice>> accepted => ChoiceName(accepted.Value.Value),
+                    Failed<ContractFailure> => "rejected",
                 });
-                writer.WriteString("mixed", MixedCodec.Decode(request.RootElement.GetProperty("mixed").GetRawText()) switch
+                writer.WriteString("mixed", MixedCodec.Decode(request.RootElement.GetProperty("mixed").GetRawText()).Value switch
                 {
-                    Result<Accepted<Mixed>, ContractFailure>.Succeeded accepted => MixedName(accepted.Value.Value),
-                    Result<Accepted<Mixed>, ContractFailure>.Failed => "rejected",
+                    Succeeded<Accepted<Mixed>> accepted => MixedName(accepted.Value.Value),
+                    Failed<ContractFailure> => "rejected",
                 });
                 writer.WriteEndObject();
             }

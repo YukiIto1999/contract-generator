@@ -10,7 +10,7 @@ import {
   positionalDocs,
   type FieldPlan,
 } from "./object-plan.js";
-import { writeUse, readUse } from "./use-codec.js";
+import { writeIntoUse, readIntoUse } from "./use-codec.js";
 
 /** Use-site check of one member value held in a possibly optional position
  * @param plan - Field plan
@@ -88,7 +88,7 @@ function ownedMembers(c: CSharpContext, node: ObjectType, plans: readonly FieldP
       .filter(owns)
       .map(
         (p) =>
-          `var owned${p.index} = f${p.index} is null ? default(${c.type(p.field.type.id)}) : f${p.index}.ToImmutableArray();`,
+          `var owned${p.index} = f${p.index} is null ? default(${c.type(p.field.type.id)}) : ${c.codec(p.field.type.id)}.Own(f${p.index}, c, ${p.pointer});`,
       ),
     ...body,
     `return c.Finish(c.IsValid ? ${t}.Complete(${values.join(", ")}) : default!);`,
@@ -96,23 +96,26 @@ function ownedMembers(c: CSharpContext, node: ObjectType, plans: readonly FieldP
   );
 }
 
-/** Reader branch of one known member
+/** One typed member continuation
  * @param c - Target context
  * @param plan - Field plan
- * @returns Switch case source
+ * @returns Reader branch source
  */
 function readCase(c: CSharpContext, plan: FieldPlan): string {
   const { field, index } = plan;
   const pointer = `Wire.At(path, ${quote(field.wireName)})`;
   const present = field.optional ? `Presence<${c.use(field.type)}>.Present(decoded)` : "decoded";
-  const verify = plan.check.call("decoded", pointer, true);
+  const verify = plan.check.call("decoded", "childPath", true);
   return lines(
     `case ${quote(field.wireName)}: {`,
-    `if (seen${index}) c.Add(Wire.At(path, propertyName), "format"); seen${index} = true;`,
-    "int before = c.ViolationCount;",
-    `var decoded = ${readUse(c, field.type, "property.Value", pointer)};`,
+    !field.optional && `seen${index} = true;`,
+    `var childPath = ${pointer}; int before = c.ViolationCount;`,
+    `Action<${c.use(field.type)}> acceptChild = decoded => {`,
     verify && `if (c.ViolationCount == before) { ${verify} }`,
-    `f${index} = ${present}; break;`,
+    `f${index} = ${present}; pending.Push(Next);`,
+    "};",
+    readIntoUse(c, field.type, "property.Value", "childPath", "acceptChild"),
+    "return;",
     "}",
   );
 }
@@ -126,16 +129,23 @@ function readCase(c: CSharpContext, plan: FieldPlan): string {
 function readMember(c: CSharpContext, node: ObjectType, plans: readonly FieldPlan[]): string {
   const t = c.type(node.id);
   return lines(
-    doc(
-      "Single-pass object acceptance without public reconstruction",
-      ["element", "c", "path", "binding", "encoding"],
-      "Candidate that the caller discards when a violation was recorded",
-    ),
-    `internal static ${t} Read(JsonElement element, ReadContext c, string path, string binding, string? encoding) {`,
-    `if (element.ValueKind != JsonValueKind.Object) { c.Add(path, element.ValueKind == JsonValueKind.Null ? "null" : "type"); return default!; }`,
+    doc("Private typed object continuation scheduling", [
+      "element",
+      "c",
+      "path",
+      "binding",
+      "encoding",
+      ["pending", "Traversal work stack"],
+      ["complete", "Completed candidate receiver"],
+    ]),
+    `internal static void ReadInto(JsonElement element, ReadContext c, Wire.Path path, string binding, string? encoding, global::System.Collections.Generic.Stack<Action> pending, Action<${t}> complete) => pending.Push(() => {`,
+    `if (element.ValueKind != JsonValueKind.Object) { c.Add(path, element.ValueKind == JsonValueKind.Null ? "null" : "type"); complete(default!); return; }`,
     "int beforeObject = c.ViolationCount;",
-    ...plans.map((p) => `${c.field(p.field)} f${p.index} = default!; bool seen${p.index} = false;`),
-    "foreach (var property in element.EnumerateObject()) {",
+    ...plans.map((p) => `${c.field(p.field)} f${p.index} = default!;`),
+    ...plans.filter((p) => !p.field.optional).map((p) => `bool seen${p.index} = false;`),
+    "var properties = element.EnumerateObject();",
+    "void Next() {",
+    "while (properties.MoveNext()) { var property = properties.Current;",
     "if (!Wire.TryName(property, c, path, out var propertyName)) continue;",
     "switch (propertyName) {",
     ...plans.map((plan) => readCase(c, plan)),
@@ -146,8 +156,10 @@ function readMember(c: CSharpContext, node: ObjectType, plans: readonly FieldPla
       .map(
         (p) => `if (!seen${p.index}) c.Add(Wire.At(path, ${quote(p.field.wireName)}), "required");`,
       ),
-    `return c.ViolationCount == beforeObject ? ${t}.Complete(${plans.map((p) => `f${p.index}`).join(", ")}) : default!;`,
+    `complete(c.ViolationCount == beforeObject ? ${t}.Complete(${plans.map((p) => `f${p.index}`).join(", ")}) : default!);`,
     "}",
+    "pending.Push(Next);",
+    "});",
   );
 }
 
@@ -160,8 +172,8 @@ function readMember(c: CSharpContext, node: ObjectType, plans: readonly FieldPla
 function writeCase(c: CSharpContext, node: ObjectType, plan: FieldPlan): string {
   const { field } = plan;
   const v = `value.${c.property(node.id, field.name)}`;
-  const write = `writer.WritePropertyName(${quote(field.wireName)}); ${writeUse(c, field.type, field.optional ? `${v}.Value` : v)}`;
-  return field.optional ? `if (${v}.IsPresent) { ${write} }` : write;
+  const write = `writer.WritePropertyName(${quote(field.wireName)}); pending.Push(Next); ${writeIntoUse(c, field.type, field.optional ? `${v}.Value` : v)}`;
+  return field.optional ? `if (${v}.IsPresent) { ${write} } else pending.Push(Next);` : write;
 }
 
 /** Object wire output
@@ -172,12 +184,21 @@ function writeCase(c: CSharpContext, node: ObjectType, plan: FieldPlan): string 
  */
 function writeMember(c: CSharpContext, node: ObjectType, plans: readonly FieldPlan[]): string {
   return lines(
-    doc("Immutable object wire output", ["writer", "value", "binding", "encoding"]),
-    `internal static void Write(Utf8JsonWriter writer, ${c.type(node.id)} value, string binding, string? encoding) {`,
-    "writer.WriteStartObject();",
-    ...plans.map((plan) => writeCase(c, node, plan)),
-    "writer.WriteEndObject();",
-    "}",
+    doc("Private typed object output scheduling", [
+      "writer",
+      "value",
+      "binding",
+      "encoding",
+      ["pending", "Traversal work stack"],
+    ]),
+    `internal static void WriteInto(Utf8JsonWriter writer, ${c.type(node.id)} value, string binding, string? encoding, global::System.Collections.Generic.Stack<Action> pending) => pending.Push(() => {`,
+    "writer.WriteStartObject(); int field = 0;",
+    "void Next() { switch (field++) {",
+    ...plans.map((plan, index) => `case ${index}: { ${writeCase(c, node, plan)} return; }`),
+    "default: writer.WriteEndObject(); return;",
+    "} }",
+    "pending.Push(Next);",
+    "});",
   );
 }
 
@@ -196,7 +217,7 @@ export function objectCodec(
   const members = lines(
     ...plans.map((plan) => plan.check.declaration),
     doc("Immutable object guard", ["value", "c", "path"]),
-    `internal static void Check(${t} value, ReadContext c, string path) { if (value is null) c.Add(path, "null"); }`,
+    `internal static void Check(${t} value, ReadContext c, Wire.Path path) { if (value is null) c.Add(path, "null"); }`,
     readMember(c, node, plans),
     writeMember(c, node, plans),
   );

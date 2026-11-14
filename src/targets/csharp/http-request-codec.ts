@@ -6,6 +6,7 @@ import { lines, name, pascal, quote } from "./naming.js";
 import { isJsonMediaType } from "./naming.js";
 import { planFields, type FieldPlan } from "./object-plan.js";
 import { readUse, writeUse } from "./use-codec.js";
+import { renderTransportMembers } from "./http-transport-codec.js";
 
 /** How the HTTP request carries the operation input beside its placed parameters */
 export type RequestShape = "none" | "parameters" | "member" | "binary";
@@ -129,8 +130,8 @@ function binaryEncode(
     ),
     `public static Result<string, ContractFailure> EncodeParameters(${t} value) {`,
     `var checkedValue = ${c.codec(input.id)}.Validate(value);`,
-    `if (checkedValue is Result<Accepted<${t}>, ContractFailure>.Failed failed) return new Result<string, ContractFailure>.Failed(failed.Failure);`,
-    "return new Result<string, ContractFailure>.Succeeded(Wire.Encode(value, (writer, value, binding, encoding) => {",
+    `if (checkedValue.IsFailed(out var failed, out _)) return failed;`,
+    "return Result.Succeeded(Wire.Encode(value, (writer, value, binding, encoding) => {",
     "writer.WriteStartObject();",
     ...members,
     `writer.WriteEndObject();`,
@@ -218,8 +219,8 @@ function binaryDecode(
  * @returns Public static class, or nothing when the placed parameters and the body fit one JSON object
  */
 export function renderHttpRequestCodec(c: CSharpContext, operation: Operation): string {
+  if (!operation.http) return "";
   const shape = requestShape(c, operation);
-  if (shape === "none") return "";
   const body = binaryBody(c, operation);
   const members =
     shape === "binary" && body
@@ -227,13 +228,16 @@ export function renderHttpRequestCodec(c: CSharpContext, operation: Operation): 
           binaryEncode(c, operation, planFields(c, inputOf(c, operation)), body),
           binaryDecode(c, operation, planFields(c, inputOf(c, operation)), body),
         )
-      : mergedDecode(c, operation, shape === "parameters" ? "parameters" : "member");
+      : shape === "none"
+        ? ""
+        : mergedDecode(c, operation, shape === "parameters" ? "parameters" : "member");
   return lines(
     doc(
       `HTTP request projection of ${operation.name} for the types assembly, which alone can complete the input`,
     ),
     `public static class ${name(pascal(operation.name) + "HttpRequestCodec")} {`,
     members,
+    renderTransportMembers(c, operation, shape),
     "}",
   );
 }

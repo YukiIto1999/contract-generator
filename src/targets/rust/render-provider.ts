@@ -67,7 +67,6 @@ export function renderProvider(ctx: RustContext): string {
   const body = `//! Contract-side adapter interfaces and generated provider dispatch
 use ${prefix}_types::*;
 pub use ${prefix}_transport::*;
-use serde_json::Value;
 use std::future::Future;
 /// Adapter-owned implementation of generated public contract operations
 pub trait Handler: Send + Sync + 'static {

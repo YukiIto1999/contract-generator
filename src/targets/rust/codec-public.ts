@@ -1,54 +1,49 @@
 import type { ContractType } from "../../model/contract-model.js";
 import { key } from "./naming.js";
 
-/** Public codec functions for one canonical declaration
+/** Public text and byte codecs for one canonical declaration
  * @param type - Resolved declaration
- * @param guard - Statements asserting that an unvalidated value is acceptable before it is encoded, or an empty string
- * @returns Rust entry points
+ * @param guard - Assertions for an unwrapped scalar before encoding
+ * @returns Rust entry points that never expose transient parser storage
  */
 export function publicCodec(type: ContractType, guard = ""): string {
   const id = key(type);
+  const leaf = type.kind === "scalar" || type.kind === "literal" || type.kind === "enum";
   return `
-/// Exact JSON boundary decoding for ${type.name}
+/// Complete JSON text or byte decoding without Unicode replacement
 ///
-/// - source: complete JSON text
+/// - source: complete UTF-8 JSON text or bytes
 /// - binding: selected wire interpretation
 /// - Return: complete value with diagnostics
 /// # Errors
-/// Syntax or contract violations without a partial value
-pub fn decode_${id}(source: &str, binding: Binding) -> Result<Accepted<${type.name}>, ValidationFailure> {
-    decode_${id}_value(parse_json(source)?, binding)
-}
-/// Owned parsed JSON boundary decoding for ${type.name}
-///
-/// - value: adopted parser output
-/// - binding: selected wire interpretation
-/// - Return: complete value with diagnostics
-/// # Errors
-/// Contract violations without a partial value
-pub fn decode_${id}_value(value: Value, binding: Binding) -> Result<Accepted<${type.name}>, ValidationFailure> {
+/// Invalid UTF-8, ambiguous JSON text, syntax or contract violations
+pub fn decode_${id}(source: impl std::convert::AsRef<[u8]>, binding: Binding) -> Result<Accepted<${type.name}>, ValidationFailure> {
+    let mut json = parse_json_bytes(source.as_ref())?;
+    let root = json.root;
     let mut state = State::default();
-    let value = _decode_${id}(value, binding, None, "", &mut state);
+    let value = _decode_${id}(&mut json, root, binding, None, 0, &mut state);
     state.finish(value)
 }
 /// Canonical JSON encoding without unknown-member retransmission
 ///
 /// - value: validated value reference
 /// - binding: selected wire interpretation
-/// - Return: exact binding JSON
+/// - Return: complete exact binding JSON
 /// # Panics
 /// A value that bypassed validated construction
-pub fn encode_${id}(value: &${type.name}, binding: Binding) -> String { encode_${id}_value(value, binding).to_string() }
-/// Parsed JSON encoding of an immutable accepted value
-///
-/// - value: validated value reference
-/// - binding: selected wire interpretation
-/// - Return: binding-local JSON value
-/// # Panics
-/// A value that bypassed validated construction
-pub fn encode_${id}_value(value: &${type.name}, binding: Binding) -> Value {
+pub fn encode_${id}(value: &${type.name}, binding: Binding) -> String {
     ${guard}
     _encode_${id}(value, binding, None)
 }
-`;
+${
+  leaf
+    ? `/// Private scalar JSON document encoding through library events
+fn _encode_${id}(value: &${type.name}, binding: Binding, encoding: Option<&str>) -> String {
+    let mut writer = _JsonWriter::new();
+    _write_${id}(value, binding, encoding, &mut writer);
+    writer.finish()
+}
+`
+    : ""
+}`;
 }

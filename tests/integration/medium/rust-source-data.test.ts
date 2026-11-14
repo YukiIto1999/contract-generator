@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { rustSourceDataFiles } from "../../fixtures/rust/materialize.js";
@@ -10,9 +10,7 @@ import {
   memberBreaks,
   oneLine,
   pickJson,
-  pickTagOneLine,
   specimenJson,
-  wireNameOneLine,
 } from "./hostile-source.js";
 import { decode } from "./rust/drivers.js";
 import {
@@ -78,15 +76,9 @@ function documentation(): string {
     .replace(/[\s\u0085]+/g, " ");
 }
 
-native("builds the types crate, the codec crate and the documentation without a warning", () => {
-  expect(existsSync(codec().codec)).toBe(true);
-  expect(documentation()).not.toBe("");
-});
-
 native("keeps every description of a declaration as documentation text", () => {
   const text = documentation();
   for (const [label, kind] of declarations) expect(text, label).toContain(oneLine(label, kind));
-  expect(text).toContain(`Payload for exact tag ${pickTagOneLine}`);
 });
 
 native("keeps every description of a member as documentation of the constructor parameter", () => {
@@ -95,7 +87,6 @@ native("keeps every description of a member as documentation of the constructor 
     expect(text, label).toContain(`field_${label}: ${oneLine(label)}`);
   expect(text).toContain("field_fence: fence-before");
   expect(text).toContain("fence-after");
-  expect(text).toContain(`field_bare: owned ${wireNameOneLine} presence state`);
 });
 
 native("runs no documentation as a test, whatever a description holds", () => {

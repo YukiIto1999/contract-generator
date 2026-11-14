@@ -139,7 +139,7 @@ function bound(value: string, exclusive: boolean): NumericBound {
  * @param text - Valid JSON numeric token
  * @param range - Declared boundaries
  */
-function checkRange(state: State, path: string, text: string, range: NumericRange): void {
+function checkRange(state: State, path: Path, text: string, range: NumericRange): void {
   const candidate = new LosslessNumber(text);
   if (range.minimum !== undefined) {
     const order = compareLosslessNumber(candidate, range.minimum.value);

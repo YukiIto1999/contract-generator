@@ -60,15 +60,14 @@ export function storage(type: ContractType): string {
   return exactNumeric(type) ? "ExactNumber" : nativeStorage[type.scalar];
 }
 
-/** Nullable and indirect use representation independent of field presence
+/** Nullable canonical handle representation independent of field presence
  * @param ctx - Rendering context
  * @param use - Resolved use
  * @returns Rust type expression
  */
 export function useType(ctx: RustContext, use: TypeUse): string {
   const name = node(ctx, use.id).name;
-  const owned = ctx.boxed.has(use) ? `Box<${name}>` : name;
-  return use.nullable ? `Option<${owned}>` : owned;
+  return use.nullable ? `Option<${name}>` : name;
 }
 
 /** Field representation retaining omission independently from null
