@@ -163,7 +163,7 @@ impl Call {
         let ipc = if kind == Kind::Ipc { Some(ProcessTransport::start(&request["reply"]).await) } else { None };
         let http = if kind == Kind::Http {
             let origin = request["origin"].as_str().expect("fixture origin").parse().expect("native URL");
-            Some(HostHttp(client::ReqwestTransport::new(reqwest::Client::builder().build().expect("native client"), origin)))
+            Some(HostHttp(client::ReqwestTransport::new(reqwest::Client::builder(), origin).expect("native client")))
         } else {
             None
         };

@@ -183,7 +183,7 @@ export function renderHttpClient(c: CSharpContext, operation: Operation): string
     requestStatements(c, operation, requestShape(c, operation)),
     "cancellationToken.ThrowIfCancellationRequested();",
     "try {",
-    "using var response = await requirements.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);",
+    "using var response = await requirements.Http.Send(request, cancellationToken).ConfigureAwait(false);",
     "int status = (int)response.StatusCode;",
     "bool gateway = status is 502 or 503 or 504;",
     resultBlocks(c, operation),

@@ -114,3 +114,56 @@ export async function expectUnsafeValuesNeverSent(driver: string, peers: PeerPoo
   );
   expect(peer.requests).toHaveLength(0);
 }
+
+/** Redirect statuses that a native HTTP client follows by default */
+const followedStatuses = [301, 302, 303, 307, 308] as const;
+
+/** Upload calls of the raw bytes operation, whose request carries a body
+ * @param origins - Service origins, one call each
+ * @returns Calls against the origins
+ */
+function uploadCalls(origins: readonly string[]): readonly Record<string, unknown>[] {
+  return origins.map((url) => ({ operation: "upload", bytes: "AP+A", url }));
+}
+
+/** A redirect that would carry the request to another origin never reaches that origin
+ * @param driver - Built FeaturesDriver.dll path
+ * @param peers - Pool that owns the raw peers of the suite
+ */
+export async function expectRedirectsNeverReachAnotherOrigin(
+  driver: string,
+  peers: PeerPool,
+): Promise<void> {
+  const target = await peers.start(
+    httpResponse(200, { "Content-Type": "application/json" }, '{"value":"stored"}'),
+  );
+  const sources = await Promise.all(
+    followedStatuses.map((status) =>
+      peers.start(httpResponse(status, { Location: `${target.origin}leak` })),
+    ),
+  );
+  const observations = await runDriver(driver, uploadCalls(sources.map((source) => source.origin)));
+  expect(target.requests).toHaveLength(0);
+  observations.forEach((observation, index) => {
+    const name = `status ${followedStatuses[index]}`;
+    expect(sources[index]!.requests, name).toHaveLength(1);
+    expect(observation, name).toMatchObject({
+      exit: "defected",
+      defect: "InvalidOperationException",
+    });
+  });
+}
+
+/** A redirect to the same origin is not followed and is an undeclared response
+ * @param driver - Built FeaturesDriver.dll path
+ * @param peers - Pool that owns the raw peers of the suite
+ */
+export async function expectSameOriginRedirectNotFollowed(
+  driver: string,
+  peers: PeerPool,
+): Promise<void> {
+  const peer = await peers.start(httpResponse(307, { Location: "/elsewhere" }));
+  const [observation] = await runDriver(driver, uploadCalls([peer.origin]));
+  expect(peer.requests).toHaveLength(1);
+  expect(observation).toMatchObject({ exit: "defected", defect: "InvalidOperationException" });
+}

@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { call, drive, provider } from "./rust/drivers.js";
 import { build, dispose, type Native } from "./rust/native.js";
-import { field, header, peer, received, respond, stopChildren } from "./rust/protocol.js";
+import {
+  field,
+  header,
+  peer,
+  received,
+  respond,
+  stopChildren,
+  type Peer,
+} from "./rust/protocol.js";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 1_800_000 });
 const native = test;
@@ -156,3 +164,50 @@ native("omits unplaced optional parameters and sends a raw binary body unchanged
   expect(header(upload.head, "content-type")).toBe("application/octet-stream");
   expect([...upload.body]).toEqual([0, 255, 128]);
 });
+
+/** Connections that a raw peer accepted so far
+ * @param observed - Running raw peer
+ * @returns Number of accepted connections
+ */
+function connections(observed: Peer): number {
+  return observed.stdout.lines.filter((line) => field(line.json, "connection") !== undefined)
+    .length;
+}
+
+/** Raw binary upload over real HTTP
+ * @param origin - Service origin
+ * @returns Driver observation
+ */
+function uploadTo(origin: string): Record<string, unknown> {
+  return call(built, {
+    binding: "http",
+    origin,
+    operation: "store",
+    parameters: '{"key":"k","data":"AP+A"}',
+  });
+}
+
+native(
+  "never lets a redirect carry the request to another origin and reports it as a contract defect",
+  async () => {
+    for (const status of [302, 307]) {
+      const target = await peer(built.base, respond(204, {}));
+      const location = `${target.origin}/leak`;
+      const source = await peer(built.base, respond(status, { Location: location }));
+      const result = uploadTo(source.origin);
+      expect(connections(target), `status ${status} reached the other origin`).toBe(0);
+      expect(connections(source), `status ${status}`).toBe(1);
+      expect(result, `status ${status}`).toEqual({ kind: "defect" });
+    }
+  },
+);
+
+native(
+  "does not follow a redirect to the same origin and reports it as a contract defect",
+  async () => {
+    const origin = await peer(built.base, respond(307, { Location: "/elsewhere" }));
+    const result = uploadTo(origin.origin);
+    expect(connections(origin)).toBe(1);
+    expect(result).toEqual({ kind: "defect" });
+  },
+);

@@ -107,7 +107,9 @@ A route is an absolute path of nonempty segments that are neither `.` nor `..`.
 A percent-encoded spelling of either dot segment is rejected too.
 An empty segment is allowed only as a trailing slash, and a placeholder fills a whole segment.
 A generated client never sends a request outside the configured origin.
+Redirects are never followed, including redirects to the same origin; a 3xx response is undeclared and becomes a contract defect. The bundled transports enforce this policy, and custom transports must preserve it.
 A path value that is empty, `.`, or `..`, or a header value with a control character other than a horizontal tab, has no wire form, so the call returns a communication failure before anything is sent.
+Header validation examines the original text before the platform can trim it.
 
 ## Generating
 
@@ -183,7 +185,7 @@ An input that is ambiguous under these rules is rejected, never repaired or norm
 
 The generated code returns `Result` and `AsyncResult` from `ts-results-es` and does not define an effect type.
 The module named by `typescript-effect-module` exports `Effect<Env, E, A>`, callable as `(env, signal, deadlineAt) => AsyncResult<A, E>`, and `deferEffect`, which takes a function of that shape.
-`createFetchTransport` forwards the signal and adds no timer.
+`createFetchTransport` forwards the signal, forces manual redirect handling, and adds no timer. Browser `opaqueredirect` responses are contract defects, not successful responses or communication failures.
 
 Install the generated module's runtime dependencies directly in the consuming application:
 
@@ -236,7 +238,8 @@ Both imports keep analyzer assemblies out of runtime dependencies.
 The shared import rejects a missing analyzer project rather than silently omitting the check.
 Generated switches over closed types enumerate every variant without a default or discard arm.
 The generated global analyzer configuration enables `TYPMOD021`, which rejects explicit catchall arms over closed types. Consumers import this configuration through `Contract.Analysis.props`, so adding a future variant requires an explicit consumer case.
-Effect-building methods take no deadline argument. The composition root supplies a clock, deadline diagnostics, an absolute `Deadline`, and the deadline-failure factory to `EffectRuntime`; native effects receive that same deadline through `Try`. IPC transports accept `Deadline` with the cancellation token last, and HTTP handlers read `HttpRequestOptionsKey<Deadline>` through `ContractClient.DeadlineOption`.
+Effect-building methods take no deadline argument. The composition root supplies a clock, deadline diagnostics, an absolute `Deadline`, and the deadline-failure factory to `EffectRuntime`; native effects receive that same deadline through `Try`. IPC transports accept `Deadline` with the cancellation token last, and HTTP transports read `HttpRequestOptionsKey<Deadline>` through `ContractClient.DeadlineOption`.
+`IClientRequirements.Http` supplies an `IHttpTransport`, while `ServiceOrigin` supplies the destination. Use the generated `SocketsHttpTransport` for native HTTP: it owns its handler and connection pool, disables redirects after host configuration, and adds neither an `HttpClient` timeout nor response buffering. The host disposes the transport; each response belongs to its caller. A configuration callback must not retain or later mutate the handler. Custom transports implement the same no-redirect contract.
 Arrays have nominal immutable wrappers named `<ArrayName>Codec.Value`, backed by `ImmutableArray<T>`; nesting them in their codecs avoids introducing additional top-level contract-name exclusions. Their default struct value is invalid, and their factories copy and validate caller-owned collections. Private work stacks handle object, array, union, and provider-default traversal without a contract depth quota. Defaults preserve shared-child identity, do not merge distinct equal-valued children, and reuse unchanged children. JSON acceptance rejects duplicate names, a leading BOM, and ill-formed Unicode even inside unknown values, while preserving valid character and numeric spellings. Byte and output-size limits remain the host's responsibility.
 Object and provider-accepted models are sealed get-only classes with reference equality, not records with recursive equality or `with` cloning. Array values compare their immutable backing-storage identity. Union and outcome records retain exhaustive cases, but their composite payload observations do not recursively traverse object graphs. These observations are not wire-equivalence checks; use generated construction and codecs rather than depending on deep record equality.
 
@@ -244,6 +247,7 @@ Object and provider-accepted models are sealed get-only classes with reference e
 
 The generated crates use the standard `Result` and futures, with `CancellationToken` from `tokio-util` for cancellation.
 The host owns the server: it passes each request to `dispatch_http` or `dispatch_ipc` and maps the returned `ProviderFailure` to its own response.
+For native HTTP, construct `ReqwestTransport` with `ReqwestTransport::new(reqwest::Client::builder(), origin)?`. It applies the no-redirect policy to the host-configured builder before building the client, so it accepts no already built `reqwest::Client`.
 IPC hosts pass the original UTF-8 JSON `String` directly to `dispatch_ipc` and return its generated envelope text; `IpcTransport` uses the same text boundary. Tauri commands receive that string instead of a generic JSON DOM, so framework parsing cannot impose an earlier nesting limit or normalize exact numbers.
 Construction, decoding, encoding, defaults, equality, debugging, cloning, and destruction of recursive values do not recurse with value depth. Immutable composite payloads are shared; borrowed access and cloning do not copy descendant graphs. Native string and UTF-8 byte decoding enforce the strict JSON profile above, including duplicate names in unknown subtrees.
 The generated Rust README supplies a declaration-graph-derived `recursion_limit` for each consumer crate root. This compiler allowance is separate from runtime JSON depth, is not inherited through dependencies, and must also be applied to independent binary and integration-test roots that own the generated types.

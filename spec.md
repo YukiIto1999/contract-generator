@@ -133,8 +133,11 @@ bytesのpayloadは、media typeがJSONのときbindingのencodingによるJSON�
 nullableな引数はbodyにだけ置け、path・query・headerへの配置は拒否する。
 path・query・headerへ配置した引数と同じ名前のbodyの項目は、未知の項目として扱い、配置した値を上書きしない。
 routeは、空でも`.`・`..`(百分率符号化した綴りを含む)でもないsegmentからなり、placeholderはsegmentの全体を占める。
-path・headerへ配置する値が、一つのsegmentで運べない空・`.`・`..`であるか、headerの値として運べない水平tab以外の制御文字を含むとき、その値は有効な正規値でもwireの形を持たないので、送信の前に通信失敗とする。
+空・`.`・`..`のpath値、および水平tabを除くASCII制御文字（DELを含む）を持つheader値は、正規値として有効でもwireの形を持たず、送信前に通信失敗を返す。
+headerはplatformによる正規化前の元の文字列を検査する。
 生成したclientは、設定したoriginの外へ要求を送らない。
+同一originを含めredirectは追わず、3xxとbrowserの`opaqueredirect`は未宣言の応答として契約のdefectにする。
+同梱のtransportがredirectを無効にし、hostが実装するtransportにも同じ契約を求める。
 応答の読取りと検証が終わるまで成功を返さない。
 
 IPCはhostが供給するtransport上の要求と応答として定義し、操作名と結果tagで識別する。
@@ -191,7 +194,7 @@ Rust の最低サポート版は `src/targets/rust/dependencies.ts` の `rustMin
 | G17 | C#のconsumerが実行関数を持たないEffectをdefaultで返す                                                                                 | 依存側analyzerのEFFSYS008によってcompileに失敗する                                                                                                                    | runtime参照だけで利用規則の検査も伝播するとみなす設定                                                               |
 | G18 | 最低サポート版と同じ rustc・Cargo で三つの固定契約を生成する                                                                          | 全 Rust 依存単位を build し、公開構築・codec の受理と拒否を実行できる                                                                                                 | 宣言した最低版を別の compiler で検証したとみなす判定                                                                |
 | G19 | Linux の実 Wry webview から Tauri command を通して生成済みの両端を呼ぶ                                                                | 成功・宣言した拒否・不正入力の拒否と状態不変・準備前と停止後の拒否・進行中の取消後の回収を観測し、実 event loop を正常終了する                                        | mock Runtime や frame の往復だけを実 Tauri の接続とみなす判定                                                       |
-| G20 | 先頭がplaceholderのrouteで空・`.`・`..`を値にしたpath引数と、制御文字を含むheader引数                                                 | 三言語のclientが送信の前に通信失敗を返し、通常の値は設定したoriginへ同じ要求として送る                                                                                | 設定したoriginの外やdot segmentの解決先への送信と、headerと要求のframingの注入                                      |
+| G20 | 空・dotのpath値、制御文字を含むheader値、同一・別originへのredirect                                                                   | 値にwireの形がなければ送信前に通信失敗を返し、redirectは追わずdefectにし、転送先は要求を受け取らない                                                                  | platformの正規化によるheader検査の迂回、framingの注入、originやrouteの逸脱                                          |
 | G21 | 全ての行末文字、XMLで許されない制御文字、双方向制御文字、escapeに見える字句、引用符、コードブロックを含む説明文・項目名・tag・literal | 三言語の生成物をbuildまたは型検査でき、説明は文書の文字として残り、literalは宣言した値だけを受理し、説明に含めたcodeは実行されない                                    | 行末文字・制御文字による文書外へのcodeの混入、literalの字句の化け、説明のdoctest実行                                |
 | G22 | 受理するpatternの長い一致・不一致文字列、部分集合外の式、不正な既定値、独立したfieldの違反                                            | 部分集合外の式は宣言位置付きで生成を拒否し、受理した式は共通の安全な実行器で部分一致の意味を保ち、別fieldの違反があっても検証する                                     | 生成時と実行時のpatternの意味の差、native engineへのfallback、先行する違反による独立した検証の省略                  |
 | G23 | 深いobject・配列・union、共有する子、循環する可変入力、未知項目と既知違反、重複名・BOM・不正Unicodeを含むJSON                         | 三言語の構築・codec・既定値適用・終了処理をcall stackの深さに依存せず実行し、既定値適用後も共有と別個の子の区別を保ち、拒否時には違反・診断と直前の受理済み状態を保つ | 隠れた深さ上限、再帰によるprocess終了、DAGの循環扱いや木への展開、未知subtreeでのwire検査の迂回、拒否時の診断の消失 |

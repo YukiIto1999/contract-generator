@@ -9,6 +9,8 @@ import {
 } from "./csharp-features-loopback.js";
 import {
   expectOrdinaryValuesOnTheConfiguredOrigin,
+  expectRedirectsNeverReachAnotherOrigin,
+  expectSameOriginRedirectNotFollowed,
   expectUnsafeValuesNeverSent,
 } from "./csharp-features-wire.js";
 import { chooseResponses, pingResponses, type Response } from "./csharp-features-client-cases.js";
@@ -100,6 +102,13 @@ nativeTest(
 nativeTest(
   "returns an empty or dot path value and a framing header value as a communication failure before any send (G20)",
   () => expectUnsafeValuesNeverSent(features.driver("FeaturesDriver"), peers),
+);
+nativeTest(
+  "never carries a request to another origin through a redirect and reports the redirect as a defect (G20)",
+  () => expectRedirectsNeverReachAnotherOrigin(features.driver("FeaturesDriver"), peers),
+);
+nativeTest("does not follow a redirect to the same origin and reports it as a defect (G20)", () =>
+  expectSameOriginRedirectNotFollowed(features.driver("FeaturesDriver"), peers),
 );
 
 nativeTest(

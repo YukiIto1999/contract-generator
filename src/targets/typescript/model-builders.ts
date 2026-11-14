@@ -124,7 +124,7 @@ export function httpOperation(
  */
 function sampleParameter(
   name: string,
-  location: "path" | "header",
+  location: HttpParameter["location"],
   wireName: string,
 ): HttpParameter {
   return { parameter: name, location, wireName, origin };
@@ -207,6 +207,31 @@ export function httpSampleModel(): ContractModel {
       get("ping", [outcome("Done")], [result("Done")]),
       get("blobJson", [outcome("Loaded", blob)], [result("Loaded", "application/json")]),
       get("blobRaw", [outcome("Loaded", blob)], [result("Loaded", "application/octet-stream")]),
+    ],
+  };
+}
+
+/**
+ * Contract of one bodyless HTTP operation that places a query parameter and a header parameter
+ * @returns Model with `lookup`, a GET with query parameter `q` and header parameter `x-tag`
+ */
+export function httpPlacementModel(): ContractModel {
+  const text = scalarType("Text", "string");
+  const lookupInput = objectType("LookupInput", [member("q", text), member("tag", text)]);
+  const reply = objectType("Reply", [member("value", text)]);
+  return {
+    namespace: "T",
+    name: "T",
+    types: [text, lookupInput, reply],
+    operations: [
+      httpOperation("lookup", lookupInput, [outcome("Found", reply)], {
+        method: "GET",
+        path: "/lookup",
+        body: { kind: "none" },
+        requestMediaType: "application/json",
+        parameters: [sampleParameter("q", "query", "q"), sampleParameter("tag", "header", "x-tag")],
+        results: [sampleResult("Found", "application/json")],
+      }),
     ],
   };
 }

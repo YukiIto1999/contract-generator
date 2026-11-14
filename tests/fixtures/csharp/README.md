@@ -24,7 +24,7 @@ Both MSBuild properties can be supplied explicitly or inherited from the environ
 TypeModeling exposes `Result.Succeeded(value)`, `Result.Failed(failure)`, and the typed `IsFailed(out failed, out value)` eliminator.
 Effect-building methods do not accept deadline metadata. Their native `Try` callbacks receive requirements, the runtime's `Deadline`, and the cancellation token.
 The composition root constructs `EffectRuntime` with explicit requirements, a clock, and a deadline-diagnostics collector, then calls `Run` with the absolute deadline and a typed deadline-failure factory.
-The IPC transport accepts that same `Deadline` with the cancellation token last; HTTP handlers read it through `ContractClient.DeadlineOption`.
+The IPC transport accepts that same `Deadline` with the cancellation token last; HTTP transports read it through `ContractClient.DeadlineOption`.
 Parent cancellation remains cancellation, while expiration produces the host-selected typed deadline failure. The diagnostics collector records completed executions that overrun their deadline.
 
 Every generated unit and fixture project attaches the existing `TypeModeling.Analyzers` source project as a build-only analyzer (`OutputItemType="Analyzer"`, `ReferenceOutputAssembly="false"`, `PrivateAssets="all"`).
@@ -173,8 +173,9 @@ The no-default download operation reuses `DownloadInput` rather than generating 
 
 `FeaturesDriver.dll` reads JSON lines of three kinds.
 `{"type":...,"payload":...,"binding":...}` is the codec protocol for `Numbers`, `ExactInteger`, `ExactAmount`, `ExactOffset`, `NonemptyCustomer`, `Kinds` and `MergeRequest`, whose payload carries the placed parameters text and the request body text of the `merge` operation.
-`{"operation":"choose"|"route"|"upload"|"image"|"ping"|"archive",...}` runs the generated client; without `url` it dispatches into the generated provider through an in-memory handler that records the request the client sent (method, origin, target, `X-Token` and body) and the response the provider produced, and with `url` it talks to a raw TCP peer.
+`{"operation":"choose"|"route"|"upload"|"image"|"ping"|"archive",...}` runs the generated client; without `url` it dispatches into the generated provider through an in-memory `IHttpTransport` that records the request the client sent (method, origin, target, `X-Token` and body) and the response the provider produced, and with `url` it talks to a raw TCP peer through the bundled `SocketsHttpTransport`.
 The `archive` operation places `tenant` and `item` in a route that starts with a placeholder and `token` in a header, so its scenarios observe the empty and dot path values and the framing header values that the client must refuse before any send.
+The `upload` operation carries a request body, so its scenarios point `url` at a raw peer that answers 301, 302, 303, 307 or 308 with a `Location` on a second raw peer or on the same origin: the second peer receives no request, the same-origin target is never requested, and the redirect is an undeclared response, which is a defect.
 `{"operation":"provider","method":...,"target":...,"headers":...,"contentType":...,"body":<base64>}` hands a hand-written request to `ContractProvider.DispatchHttp`.
 `{"operation":"providerIpc","command":...,"parameters":...}` hands a hand-written command to `ContractProvider.DispatchIpc`, and `{"operation":"direct","payload":...}` calls the generated provider directly for the defaults operation.
 The `defaults` handler reports the effective branch through the public properties that a handler reads.
@@ -205,7 +206,7 @@ The last test removes the case label or switch arm of `Tagged.Plain`, one varian
 ## Not exercised
 
 - A native Tauri application or UI; IPC is the generic injected transport over a child process.
-- A bodyless result that carries a body behind a 204: `HttpClient` discards the body of a 204, so the bodyless selection rule is exercised at 200 with `Features.ping`.
+- A bodyless result that carries a body behind a 204: `SocketsHttpHandler` discards the body of a 204, so the bodyless selection rule is exercised at 200 with `Features.ping`.
 - A declared 502, 503 or 504 rejection in the `Sample` contract (it declares 400 and 404). The declared-503 match and mismatch are exercised only for `Features.choose`, with raw TCP responses to the generated client and the in-memory loopback for the provider.
 - The `Features` provider over a real socket and the `Features` IPC client binding at run time (they compile; the loopback and the raw peers cover the HTTP behavior, and `providerIpc` covers the IPC provider entry of the defaults operation). `Sample` covers real sockets and separate-process IPC.
 - Cancellation of the provider-side handler by a dropped HTTP connection: the fixture server passes `CancellationToken.None`, which is a host decision, so only client-side cancellation is observed.

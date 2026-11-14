@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import * as C from "./contract.js";
 import type { Check } from "./check.js";
 import { createFetchTransport, createHttpClient, createIpcClient } from "./client.js";
@@ -61,6 +61,75 @@ async function cancelPending(fixture: Values, reasonName: string): Promise<void>
   }
 }
 
+/** Request that reached a recording server */
+interface Received {
+  readonly url: string | undefined;
+  readonly body: string;
+}
+
+/**
+ * Loopback server that records every complete request before answering it
+ * @param answer - Writes the response to the request of the given path
+ * @returns Origin, the requests received so far and deterministic close
+ */
+async function recording(
+  answer: (url: string | undefined, response: ServerResponse) => void,
+): Promise<{
+  readonly baseUrl: string;
+  readonly received: readonly Received[];
+  close(): Promise<void>;
+}> {
+  const received: Received[] = [];
+  const server = await listen((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      received.push({ url: request.url, body: Buffer.concat(chunks).toString() });
+      answer(request.url, response);
+    });
+  });
+  return { baseUrl: server.baseUrl, received, close: () => server.close() };
+}
+
+/**
+ * Declared created result of the submit operation
+ * @param response - Response to write
+ */
+function created(response: ServerResponse): void {
+  response.writeHead(201, { "content-type": "application/json" });
+  response.end('{"value":"3"}');
+}
+
+/**
+ * Redirect answer
+ * @param response - Response to write
+ * @param status - Redirect status
+ * @param location - Location header value
+ */
+function redirect(response: ServerResponse, status: number, location: string): void {
+  response.writeHead(status, { location });
+  response.end();
+}
+
+/**
+ * Submit call that must end as a contract defect because the answer is an undeclared redirect
+ * @param fixture - Accepted values
+ * @param baseUrl - Origin the call is configured for
+ * @returns Rejection of the awaited call, absent when the call returned a result
+ */
+async function submitRejection(fixture: Values, baseUrl: string): Promise<unknown> {
+  const client = createHttpClient({ baseUrl, transport: createFetchTransport(fetch) });
+  return await client
+    .submit(fixture.input)(undefined, new AbortController().signal, Infinity)
+    .promise.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+}
+
+/** Redirect statuses that the Fetch standard follows by default */
+const followedStatuses = [301, 302, 303, 307, 308] as const;
+
 /**
  * Connection-level guarantees over real sockets and a separate process
  * @param fixture - Accepted values
@@ -89,6 +158,48 @@ export function networkChecks(fixture: Values): readonly Check[] {
           );
         } finally {
           await truncated.close();
+        }
+      },
+    ],
+    [
+      "http-cross-origin-redirect-never-reaches-the-other-origin",
+      async () => {
+        for (const status of followedStatuses) {
+          const target = await recording((_url, response) => created(response));
+          const source = await recording((_url, response) =>
+            redirect(response, status, `${target.baseUrl}/leak`),
+          );
+          try {
+            const rejection = await submitRejection(fixture, source.baseUrl);
+            assert.deepEqual(target.received, [], `status ${status} reached the other origin`);
+            assert.equal(source.received.length, 1, `status ${status}`);
+            assert.notEqual(source.received[0]?.body, "", `status ${status} carried a body`);
+            assert.ok(rejection instanceof C.ContractDefect, `status ${status}`);
+          } finally {
+            await source.close();
+            await target.close();
+          }
+        }
+      },
+    ],
+    [
+      "http-same-origin-redirect-is-not-followed-and-is-a-contract-defect",
+      async () => {
+        for (const status of followedStatuses) {
+          const origin = await recording((url, response) =>
+            url === "/elsewhere" ? created(response) : redirect(response, status, "/elsewhere"),
+          );
+          try {
+            const rejection = await submitRejection(fixture, origin.baseUrl);
+            assert.deepEqual(
+              origin.received.map((request) => request.url),
+              ["/submit"],
+              `status ${status} was followed`,
+            );
+            assert.ok(rejection instanceof C.ContractDefect, `status ${status}`);
+          } finally {
+            await origin.close();
+          }
         }
       },
     ],

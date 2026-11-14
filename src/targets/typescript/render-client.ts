@@ -1,9 +1,11 @@
 import type { ContractModel, Operation } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
 import {
+  headerHelperSource,
   httpHelperSource,
   ipcHelperSource,
   payloadSource,
+  queryHelperSource,
   transportSource,
 } from "./client-support.js";
 import {
@@ -80,11 +82,16 @@ export function renderClient(model: ContractModel, effectModule: string): string
   const operations = [...model.operations].sort((a, b) => compareText(a.id, b.id));
   const http = operations.filter((operation) => operation.http !== undefined);
   const ipc = operations.filter((operation) => operation.ipc !== undefined);
+  const placed = http.flatMap((operation) =>
+    operation.http!.parameters.map((parameter) => parameter.location),
+  );
   const sections = [
     `import { AsyncResult, Err, Ok, Result } from "ts-results-es";\nimport { deferEffect, type Effect } from ${quote(effectModule)};\nimport * as C from "./contract.js";\n`,
     transportSource,
     payloadSource,
     http.length > 0 && httpHelperSource,
+    placed.includes("query") && queryHelperSource,
+    placed.includes("header") && headerHelperSource,
     ipc.length > 0 && ipcHelperSource,
     ...operations.map(classificationSource),
     ...http.map((operation) => requestSource(types, operation, operation.http!)),
