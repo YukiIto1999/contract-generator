@@ -13,9 +13,14 @@ import { renderUnion } from "./union-type.js";
 /** Contract declaration generation
  * @param c - Target context
  * @param node - Resolved declaration
+ * @param needs - Nodes that provider acceptance rebuilds
  * @returns Declaration and codec
  */
-export function renderType(c: CSharpContext, node: ContractType): string {
+export function renderType(
+  c: CSharpContext,
+  node: ContractType,
+  needs: ReadonlySet<string>,
+): string {
   switch (node.kind) {
     case "scalar":
       return renderScalar(c, node);
@@ -24,7 +29,7 @@ export function renderType(c: CSharpContext, node: ContractType): string {
       return lines(objectDeclaration(c, node, plans), objectCodec(c, node, plans));
     }
     case "array":
-      return renderArray(c, node);
+      return renderArray(c, node, needs.has(node.id));
     case "union":
       return renderUnion(c, node);
     case "enum":

@@ -2,10 +2,10 @@
 export const transportSource = String.raw`/** Host-supplied HTTP I/O with typed expected failures */
 export interface HttpTransport {
   /**
-   * HTTP exchange without generated retry or timeout
-   * @param request - Complete request carrying the host cancellation signal
+   * HTTP exchange without generated retry, timeout or redirect following
+   * @param request - Complete request carrying the host cancellation signal and the manual redirect mode, which the transport MUST honor so that no request leaves the configured origin
    * @param context - Host cancellation and deadline
-   * @returns Response headers or expected communication failure
+   * @returns Response headers, a redirect status returned unfollowed, or expected communication failure
    */
   request(request: Request, context: C.CallContext): AsyncResult<Response, C.CommunicationFailure>;
   /**
@@ -56,6 +56,7 @@ function toCommunicationFailure(cause: unknown): C.CommunicationFailure {
 
 /**
  * Real Fetch integration that forwards the host cancellation signal and adds no timer
+ * Redirect following is disabled even for a caller-created request whose default mode is follow
  * @param fetcher - Host HTTP implementation
  * @returns HTTP transport with complete response reads; defects and cancellation reject the awaited result
  */
@@ -63,7 +64,7 @@ export function createFetchTransport(fetcher: typeof fetch): HttpTransport {
   return {
     request: (request, context) =>
       new AsyncResult(
-        Result.wrapAsync<Response, unknown>(() => fetcher(request, { signal: context.signal })).then((received) =>
+        Result.wrapAsync<Response, unknown>(() => fetcher(request, { signal: context.signal, redirect: "manual" })).then((received) =>
           received.mapErr(toCommunicationFailure),
         ),
       ),
@@ -180,21 +181,49 @@ function routeUrl(baseUrl: string, template: string, wire: Record<string, unknow
   const url = new URL(path, origin);
   return url.protocol === origin.protocol && url.host === origin.host ? url : undefined;
 }
+`;
 
-/**
- * Placement of a present parameter value into query parameters or headers
- * @param target - Query parameters or headers
+/** Helpers used only by operations that place a parameter in the query */
+export const queryHelperSource = String.raw`/**
+ * Placement of a present parameter value into the query parameters, where every text has a wire form
+ * @param query - Query parameters of the request URL
  * @param name - Parameter name on the wire
  * @param wire - Wire representation of the input
  * @param member - Wire member name of the parameter
- * @returns Whether the target accepted the value, false when it has no wire form there
  * @throws {@link C.ContractDefect} Representation without a JSON document
  */
-function placeValue(target: { append(name: string, value: string): void }, name: string, wire: Record<string, unknown>, member: string): boolean {
+function placeQuery(query: URLSearchParams, name: string, wire: Record<string, unknown>, member: string): void {
+  const text = wireText(wire, member);
+  if (text !== undefined) query.append(name, text);
+}
+`;
+
+/** Helpers used only by operations that place a parameter in a header */
+export const headerHelperSource = String.raw`/**
+ * Header field value that cannot frame another header or request
+ * @param text - Parameter text as written, before any Headers normalization
+ * @returns Whether the text holds no control character other than horizontal tab
+ */
+function headerText(text: string): boolean {
+  for (const char of text) if ((char < " " && char !== "\t") || char === "\u007f") return false;
+  return true;
+}
+
+/**
+ * Placement of a present parameter value into the request headers
+ * @param headers - Request headers
+ * @param name - Parameter name on the wire
+ * @param wire - Wire representation of the input
+ * @param member - Wire member name of the parameter
+ * @returns Whether the headers accepted the value, false when it has no header wire form
+ * @throws {@link C.ContractDefect} Representation without a JSON document
+ */
+function placeHeader(headers: Headers, name: string, wire: Record<string, unknown>, member: string): boolean {
   const text = wireText(wire, member);
   if (text === undefined) return true;
+  if (!headerText(text)) return false;
   try {
-    target.append(name, text);
+    headers.append(name, text);
     return true;
   } catch (cause) {
     if (cause instanceof TypeError) return false;

@@ -18,7 +18,7 @@ function memberOf(input: ObjectType, parameter: HttpParameter): string {
  * Statements placing parameters outside the body
  * @param input - Operation parameter object
  * @param http - HTTP binding
- * @returns Route URL on the service origin followed by query and header placements, each leaving with the communication failure of a value without a wire form
+ * @returns Route URL on the service origin followed by query and header placements, each header placement leaving with the communication failure of a value without a wire form
  */
 function placementStatements(input: ObjectType, http: HttpBinding): SourcePart {
   const placements = http.parameters
@@ -29,8 +29,10 @@ function placementStatements(input: ObjectType, http: HttpBinding): SourcePart {
   const rest = http.parameters
     .filter((parameter) => parameter.location !== "path")
     .map((parameter) => {
-      const target = parameter.location === "query" ? "url.searchParams" : "headers";
-      return `if (!placeValue(${target}, ${quote(parameter.wireName)}, wire, ${quote(memberOf(input, parameter))})) return noWireForm();`;
+      const placed = `${quote(parameter.wireName)}, wire, ${quote(memberOf(input, parameter))}`;
+      return parameter.location === "query"
+        ? `placeQuery(url.searchParams, ${placed});`
+        : `if (!placeHeader(headers, ${placed})) return noWireForm();`;
     });
   return [
     `const url = routeUrl(baseUrl, ${quote(http.path)}, wire, [${placements.join(", ")}]);`,
@@ -104,7 +106,7 @@ export function requestSource(
         ["signal", "Host cancellation carried by the request"],
       ],
       returns:
-        "Request with placed parameters and the declared body, or the communication failure of a value without an HTTP wire form",
+        "Request with placed parameters, the declared body and the manual redirect mode, or the communication failure of a value without an HTTP wire form",
       throws: ["C.ContractDefect", "Input that violates the contract"],
     }),
     `function build${stem}Request(baseUrl: string, input: C.${input.name}, signal: AbortSignal): Result<Request, C.CommunicationFailure> {`,
@@ -117,7 +119,7 @@ export function requestSource(
         "const wire = encoded.value as Record<string, unknown>;",
         placementStatements(input, http),
         bodyStatements(types, input, http),
-        `return Ok(new Request(url, { method: ${quote(http.method)}, headers, ${hasBody ? "...(body === undefined ? {} : { body }), " : ""}signal }));`,
+        `return Ok(new Request(url, { method: ${quote(http.method)}, headers, ${hasBody ? "...(body === undefined ? {} : { body }), " : ""}signal, redirect: "manual" }));`,
       ),
     ),
     "}",

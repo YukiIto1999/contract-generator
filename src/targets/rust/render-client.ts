@@ -55,7 +55,7 @@ pub struct HttpResponse {
     /// Raw complete bytes including an empty binary payload
     pub body: bytes::Bytes,
 }
-/// Injected HTTP execution; the host owns every deadline policy
+/// Injected HTTP execution; the host owns every deadline policy and the transport follows no redirect
 pub trait HttpTransport: Send + Sync {
     /// Borrowed service origin supplied by the host
     ///
@@ -68,25 +68,29 @@ pub trait HttpTransport: Send + Sync {
     /// - request: generated request
     /// - token: original operation cancellation
     /// - deadline: original host deadline, enforced only by the host
-    /// - Return: fully read native response
+    /// - Return: fully read native response; a redirect status is returned as the response and never followed, because a generated request must not reach another origin
     /// # Errors
     /// Native communication termination, cancellation or host-enforced deadline expiry
     fn send(&self, request: reqwest::Request, token: &CancellationToken, deadline: Option<Instant>) -> impl Future<Output = Result<HttpResponse, CommunicationFailure>> + Send;
 }
-/// Concrete adopted HTTP client without hidden connection configuration
+/// Concrete reqwest transport that follows no redirect
 pub struct ReqwestTransport {
-    /// Injected native HTTP client
+    /// Native HTTP client built by this transport
     client: reqwest::Client,
     /// Injected service origin
     origin: reqwest::Url,
 }
 impl ReqwestTransport {
-    /// Ownership transfer of host connection configuration
+    /// Client construction from the host connection configuration with redirect following disabled
     ///
-    /// - client: native client configured by the host
+    /// - builder: native client configuration of the host; its redirect policy is replaced
     /// - origin: service origin
-    /// - Return: real HTTP transport
-    pub fn new(client: reqwest::Client, origin: reqwest::Url) -> Self { Self { client, origin } }
+    /// - Return: real HTTP transport that owns the built client
+    /// # Errors
+    /// Native client construction failure
+    pub fn new(builder: reqwest::ClientBuilder, origin: reqwest::Url) -> Result<Self, reqwest::Error> {
+        Ok(Self { client: builder.redirect(reqwest::redirect::Policy::none()).build()?, origin })
+    }
 }
 impl HttpTransport for ReqwestTransport {
     fn origin(&self) -> &reqwest::Url { &self.origin }

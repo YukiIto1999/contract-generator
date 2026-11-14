@@ -107,7 +107,11 @@ op submit(id: RequestId, label: ShortLabel, @providerDefault(3) limit?: int32): 
 `.` と `..` は、百分率符号化した綴りも拒否する。
 空の segment は、末尾の slash に限って許し、placeholder は segment の全体を占める。
 生成した client は、設定した origin の外へ要求を送らない。
+同じ origin へのものも含め、redirect は追わない。
+3xx は未宣言の応答として契約の defect にする。
+同梱の transport がこの方針を守り、独自の transport にも同じ契約を求める。
 path に置く値が空、`.`、`..` のいずれかであるとき、または header に置く値が水平 tab 以外の制御文字を含むとき、その値には wire の形がないので、送信する前に通信の失敗を返す。
+header は、platform が空白を取り除く前の元の文字列を検査する。
 
 ## 生成
 
@@ -185,7 +189,8 @@ JSON の wire profile は、値が等しい場合、escape を解くと名前が
 
 生成コードは `ts-results-es` の `Result` と `AsyncResult` を返し、effect の型を自分では定義しない。
 `typescript-effect-module` で指定した module は、`(env, signal, deadlineAt) => AsyncResult<A, E>` として呼べる `Effect<Env, E, A>` と、その形の関数を受け取る `deferEffect` を export する。
-`createFetchTransport` は signal を引き渡し、timer を足さない。
+`createFetchTransport` は signal を引き渡し、redirect を手動処理に固定し、timer を足さない。
+browser の `opaqueredirect` 応答も、成功や通信失敗ではなく契約の defect にする。
 
 生成した module の実行時依存は、利用する application に直接 install する。
 
@@ -245,12 +250,19 @@ types の単位だけを使う consumer では、`EffectSystemProjectPath` を�
 利用側にも `Contract.Analysis.props` を通して設定が届くため、新しい variant には明示的な case の追加が必要になる。
 Effect を組み立てる method は deadline 引数を持たない。
 composition root が clock、期限の診断先、絶対期限 `Deadline`、期限超過時の failure factory を `EffectRuntime` に渡し、native effect は `Try` から同じ期限を受け取る。
-IPC transport は `Deadline` と末尾の cancellation token を受け取り、HTTP handler は `ContractClient.DeadlineOption` の `HttpRequestOptionsKey<Deadline>` から期限を読む。
+IPC transport は `Deadline` と末尾の cancellation token を受け取り、HTTP transport は `ContractClient.DeadlineOption` の `HttpRequestOptionsKey<Deadline>` から期限を読む。
+`IClientRequirements.Http` で `IHttpTransport`、`ServiceOrigin` で接続先を渡す。
+native HTTP には、生成する `SocketsHttpTransport` を使える。
+handler と接続 pool を所有し、host による設定の後に redirect を無効にする。
+`HttpClient` の timeout や応答の buffering は加えない。
+transport は host が破棄し、応答はそれを受け取った呼出し側が所有する。
+設定の callback は handler を保持したり、後から変更したりしてはならない。
+独自の transport にも、redirect を追わない同じ契約を求める。
 配列は `ImmutableArray<T>` を内部に持つ nominal な immutable wrapper `<ArrayName>Codec.Value` になる。
 codec の内部に型を置くため、契約の最上位名に新しい除外を設けない。
 構造体の default 値は無効であり、factory が呼び出し側の collection をコピーして要素を検証する。
 object、配列、union、provider default の走査には private な作業 stack を使い、契約上の深さ制限を設けない。
-変更のない受理済みの子は同じ値を再利用する。
+既定値を適用した後も子の共有を保ち、値が等しくても別の子は統合せず、変更のない子は再利用する。
 object と provider の受理済み model は、再帰的な等価性や `with` による複製を持つ record ではなく、get-only property を持つ sealed class であり、等価性は参照で決まる。
 配列の値は、不変な内部 storage の同一性で比較する。
 union と outcome の record は網羅できる case を保つが、複合 payload の比較・hash・文字列化では object graph を再帰的にたどらない。
@@ -262,6 +274,8 @@ JSON の受理では、未知の値の内部も含めて、重複名、先頭の
 
 生成する crate は、標準の `Result` と future を使い、取り消しには `tokio-util` の `CancellationToken` を使う。
 server は host が所有し、要求ごとに `dispatch_http` か `dispatch_ipc` を呼んで、返された `ProviderFailure` を自分の応答へ対応付ける。
+native HTTP の `ReqwestTransport` は、`ReqwestTransport::new(reqwest::Client::builder(), origin)?` で作る。
+host が設定した builder に redirect を追わない方針を適用してから client を構築するため、構築済みの `reqwest::Client` は受け取らない。
 IPC host は元の UTF-8 JSON `String` をそのまま `dispatch_ipc` へ渡し、生成した envelope の text を返す。
 `IpcTransport` も同じ text の境界を使う。
 Tauri command は汎用の JSON DOM ではなく文字列を受け取り、framework による先行 parse の深さ制限や数値の正規化を避ける。

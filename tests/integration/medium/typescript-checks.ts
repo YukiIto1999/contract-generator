@@ -33,6 +33,8 @@ export const consumerChecks = [
   "http-completed-result-survives-a-later-cancellation-and-forwards-the-deadline",
   "http-host-defect-is-propagated-unchanged",
   "http-body-truncated-by-the-peer-is-a-communication-failure",
+  "http-cross-origin-redirect-never-reaches-the-other-origin",
+  "http-same-origin-redirect-is-not-followed-and-is-a-contract-defect",
   "http-abort-error-cancellation-rejects-with-the-host-reason",
   "http-timeout-error-cancellation-rejects-with-the-host-reason",
   "ipc-separate-process-applies-the-default-and-explicit-limits",

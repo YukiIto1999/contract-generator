@@ -1,6 +1,7 @@
-import type { ContractType, TypeUse } from "../../model/contract-model.js";
+import type { ContractType, ObjectType, TypeUse } from "../../model/contract-model.js";
 import type { CSharpContext } from "./context.js";
-import { name } from "./naming.js";
+import { name, pascal } from "./naming.js";
+import type { FieldPlan } from "./object-plan.js";
 
 /** Uses that a node holds directly
  * @param node - Resolved node
@@ -65,23 +66,11 @@ export function applyMethod(c: CSharpContext, id: string): string {
   return name("Apply" + c.node(id).name);
 }
 
-/** Expression that applies provider defaults to a value of a use
- * @param c - Target context
- * @param needs - Nodes that acceptance rebuilds
- * @param use - Type use of the value
- * @param expr - Side-effect-free expression of the value
- * @returns Expression of the same type with defaults applied
+/** Identifier of the unexpanded default constant of one member
+ * @param node - Owning object
+ * @param plan - Field plan
+ * @returns Escaped field identifier
  */
-export function applyUse(
-  c: CSharpContext,
-  needs: ReadonlySet<string>,
-  use: TypeUse,
-  expr: string,
-): string {
-  if (!needs.has(use.id)) return expr;
-  const apply = `ProviderDefaults.${applyMethod(c, use.id)}`;
-  if (!use.nullable) return `${apply}(${expr})`;
-  return c.valueType(use.id)
-    ? `(${expr}.HasValue ? ${apply}(${expr}.Value) : (${c.use(use)})null)`
-    : `(${expr} is null ? null : ${apply}(${expr}))`;
+export function defaultField(node: ObjectType, plan: FieldPlan): string {
+  return name(node.name + pascal(plan.field.name) + "Default");
 }

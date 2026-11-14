@@ -3,6 +3,7 @@ import { renderIpcClient } from "./client-ipc.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { httpClientSupport, httpCommon } from "./http-support.js";
+import { renderHttpTransport } from "./http-transport.js";
 import { lines } from "./naming.js";
 
 /** Injected native HTTP and IPC client
@@ -11,6 +12,7 @@ import { lines } from "./naming.js";
  */
 export function renderClient(c: CSharpContext): string {
   return lines(
+    renderHttpTransport(),
     doc("Caller-owned IPC communication effect"),
     "public interface IIpcTransport {",
     doc(
@@ -27,10 +29,10 @@ export function renderClient(c: CSharpContext): string {
     "}",
     doc("Injected client communication requirements"),
     "public interface IClientRequirements : IEffectRequirements {",
-    doc("Caller-owned native HTTP client", [], undefined, {
-      value: "Configured connection and authentication ownership",
+    doc("Caller-owned native HTTP transport", [], undefined, {
+      value: "Configured connection and authentication ownership that follows no redirect",
     }),
-    "HttpClient HttpClient { get; }",
+    "IHttpTransport Http { get; }",
     doc("Caller-owned service origin", [], undefined, { value: "Absolute HTTP service origin" }),
     "Uri ServiceOrigin { get; }",
     doc("Caller-owned IPC transport", [], undefined, {

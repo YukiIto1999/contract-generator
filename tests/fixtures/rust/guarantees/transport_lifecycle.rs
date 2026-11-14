@@ -107,7 +107,7 @@ async fn real_http_envelopes_carry_deep_typed_values_and_reject_invalid_utf8() {
     let port = ready["port"].as_u64().expect("port");
     let origin = format!("http://127.0.0.1:{port}/");
     let http = reqwest::Client::new();
-    let transport = client::ReqwestTransport::new(http.clone(), origin.parse().expect("provider URL"));
+    let transport = client::ReqwestTransport::new(reqwest::Client::builder(), origin.parse().expect("provider URL")).expect("native client");
     let source = format!(r#"{{"tree":{tree}}}"#);
     let typed = types::decode_grow_input(&source, Binding::Http).expect("deep HTTP input").value;
     let result = client::grow_http(&transport, typed, &CancellationToken::new(), None).await.expect("actual HTTP exchange");
