@@ -1,26 +1,20 @@
-import type {
-  ArrayType,
-  ContractType,
-  ObjectType,
-  TypeUse,
-  UnionType,
-} from "../../model/contract-model.js";
+import type { ContractType, ObjectType } from "../../model/contract-model.js";
 import { wireConstant } from "./constants.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
-import { lines, name, pascal, quote } from "./naming.js";
+import { lines, quote } from "./naming.js";
 import { planFields, type FieldPlan } from "./object-plan.js";
-import { applyMethod } from "./provider-default-plan.js";
+import { applyMethod, defaultField } from "./provider-default-plan.js";
+import {
+  applyArray,
+  applyObject,
+  applyUnion,
+  scheduleMethod,
+  settledLookup,
+  variantStep,
+} from "./provider-default-steps.js";
+import { renderSettlement, renderTraversal } from "./provider-default-traversal.js";
 import { readUse } from "./use-codec.js";
-
-/** Identifier of the unexpanded default constant of one member
- * @param node - Owning object
- * @param plan - Field plan
- * @returns Escaped field identifier
- */
-function defaultField(node: ObjectType, plan: FieldPlan): string {
-  return name(node.name + pascal(plan.field.name) + "Default");
-}
 
 /** Lazily decoded default constant without dependent default expansion
  * @param c - Target context
@@ -44,153 +38,25 @@ function defaultDeclaration(c: CSharpContext, node: ObjectType, plan: FieldPlan)
   );
 }
 
-/** Identifier of one typed trampoline step
+/** Default application entrypoint for an operation input
  * @param c - Target context
- * @param id - Node identity
- * @returns Escaped method identifier
+ * @param node - Operation input that contains a default
+ * @returns Internal entrypoint owning one traversal
  */
-function scheduleMethod(c: CSharpContext, id: string): string {
-  return name("Schedule" + c.node(id).name);
-}
-
-/** Deferred child traversal with nullable values left intact
- * @param c - Target context
- * @param use - Child type
- * @param source - Stable child expression
- * @param callback - Typed completion callback
- * @param absent - Completion statement for a null child
- * @returns Scheduling statements
- */
-function scheduleUse(
-  c: CSharpContext,
-  use: TypeUse,
-  source: string,
-  callback: string,
-  absent = "",
-): string {
-  const child = use.nullable ? "child" : source;
-  const schedule = `pending.Push(() => ${scheduleMethod(c, use.id)}(${child}, pending, ${callback}));`;
-  if (!use.nullable) return schedule;
-  return lines(
-    "{",
-    `if (${source} is { } child) { ${schedule} }`,
-    absent ? `else { ${absent} }` : "",
-    "}",
-  );
-}
-
-/** One object's field traversal without recursive default dependencies
- * @param c - Target context
- * @param needs - Nodes that acceptance traverses
- * @param node - Resolved object
- * @param plan - Field plan
- * @returns Field initialization and deferred traversal
- */
-function scheduleMember(
-  c: CSharpContext,
-  needs: ReadonlySet<string>,
-  node: ObjectType,
-  plan: FieldPlan,
-): string {
-  const { field, index } = plan;
-  const local = `f${index}`;
-  const source = field.optional ? `${local}.Value` : local;
-  const present = `Presence<${c.use(field.type)}>.Present`;
-  const scheduled = needs.has(field.type.id)
-    ? scheduleUse(
-        c,
-        field.type,
-        source,
-        `(applied, childChanged) => { if (childChanged) { ${local} = ${field.optional ? `${present}(applied)` : "applied"}; changed = true; } }`,
-      )
-    : "";
-  return lines(
-    field.optional && field.default !== undefined
-      ? `if (!${local}.IsPresent) { ${local} = ${present}(${defaultField(node, plan)}.Value); changed = true; }`
-      : "",
-    scheduled && field.optional ? `if (${local}.IsPresent) { ${scheduled} }` : scheduled,
-  );
-}
-
-/** Deferred object completion preserving unchanged accepted instances
- * @param c - Target context
- * @param needs - Nodes that acceptance traverses
- * @param node - Resolved object
- * @returns Trampoline step body
- */
-function applyObject(c: CSharpContext, needs: ReadonlySet<string>, node: ObjectType): string {
-  const plans = planFields(c, node);
-  return lines(
-    "var changed = false;",
-    ...plans.map((plan) => `var f${plan.index} = value.${plan.property};`),
-    `pending.Push(() => complete(changed ? ${c.type(node.id)}.Complete(${plans.map((plan) => `f${plan.index}`).join(", ")}) : value, changed));`,
-    ...plans.map((plan) => scheduleMember(c, needs, node, plan)),
-  );
-}
-
-/** Deferred array traversal with copy-on-change storage
- * @param c - Target context
- * @param node - Resolved array
- * @returns Trampoline step body
- */
-function applyArray(c: CSharpContext, node: ArrayType): string {
-  return lines(
-    `ImmutableArray<${c.use(node.element)}>.Builder? builder = null;`,
-    "var index = 0;",
-    "void Next() {",
-    `if (index == value.Length) { complete(builder is null ? value : ${c.type(node.id)}.Complete(builder.MoveToImmutable()), builder is not null); return; }`,
-    "var position = index++;",
-    "var item = value[position];",
-    scheduleUse(
-      c,
-      node.element,
-      "item",
-      lines(
-        "(applied, changed) => {",
-        "if (changed) {",
-        "if (builder is null) {",
-        `builder = ImmutableArray.CreateBuilder<${c.use(node.element)}>(value.Length);`,
-        "foreach (var original in value) builder.Add(original);",
-        "}",
-        "builder[position] = applied;",
-        "}",
-        "pending.Push(Next);",
-        "}",
-      ),
-      "pending.Push(Next);",
-    ),
-    "}",
-    "pending.Push(Next);",
-  );
-}
-
-/** Deferred union traversal preserving unchanged accepted variants
- * @param c - Target context
- * @param needs - Nodes that acceptance traverses
- * @param node - Resolved union
- * @returns Trampoline step body
- */
-function applyUnion(c: CSharpContext, needs: ReadonlySet<string>, node: UnionType): string {
+function applyInput(c: CSharpContext, node: ContractType): string {
   const t = c.type(node.id);
   return lines(
-    "switch (value) {",
-    ...node.variants.map((variant, index) => {
-      const record = `${t}.${name(pascal(variant.name))}`;
-      const value = `variant${index}`;
-      return lines(
-        `case ${record} ${value}:`,
-        needs.has(variant.type.id)
-          ? scheduleUse(
-              c,
-              variant.type,
-              `${value}.Value`,
-              `(applied, changed) => pending.Push(() => complete(changed ? ${record}.Complete(applied) : value, changed))`,
-              "complete(value, false);",
-            )
-          : "complete(value, false);",
-        "break;",
-      );
-    }),
+    doc(
+      `Stack-safe provider default application below ${node.name}`,
+      [["value", "Validated value"]],
+      "Value with omitted defaulted members filled",
+    ),
+    `internal static ${t} ${applyMethod(c, node.id)}(${t} value) {`,
+    "var work = new Traversal();",
+    "var result = value;",
+    `${scheduleMethod(c, node.id)}(value, work, (applied, _) => result = applied);`,
+    "while (work.Pending.TryPop(out var next)) next();",
+    "return result;",
     "}",
   );
 }
@@ -199,7 +65,7 @@ function applyUnion(c: CSharpContext, needs: ReadonlySet<string>, node: UnionTyp
  * @param c - Target context
  * @param needs - Nodes that acceptance rebuilds
  * @param node - Resolved node that holds a default somewhere below it
- * @returns Declarations of the node's defaults and its application method
+ * @returns Declarations of the node's defaults and its typed step
  */
 function applyNode(c: CSharpContext, needs: ReadonlySet<string>, node: ContractType): string {
   if (node.kind !== "object" && node.kind !== "array" && node.kind !== "union") return "";
@@ -210,30 +76,24 @@ function applyNode(c: CSharpContext, needs: ReadonlySet<string>, node: ContractT
           .filter((plan) => plan.field.default !== undefined)
           .map((plan) => defaultDeclaration(c, node, plan))
       : []),
-    doc(
-      `Stack-safe provider default application below ${node.name}`,
-      [["value", "Validated value"]],
-      "Value with omitted defaulted members filled",
-    ),
-    `internal static ${t} ${applyMethod(c, node.id)}(${t} value) {`,
-    "var pending = new global::System.Collections.Generic.Stack<Action>();",
-    "var result = value;",
-    `${scheduleMethod(c, node.id)}(value, pending, (applied, _) => result = applied);`,
-    "while (pending.TryPop(out var next)) next();",
-    "return result;",
-    "}",
     doc(`Deferred provider default application below ${node.name}`, [
       ["value", "Validated value"],
-      ["pending", "Private traversal work stack"],
+      ["work", "Private traversal state"],
       ["complete", "Typed completion receiving the changed flag"],
     ]),
-    `private static void ${scheduleMethod(c, node.id)}(${t} value, global::System.Collections.Generic.Stack<Action> pending, Action<${t}, bool> complete) {`,
+    `private static void ${scheduleMethod(c, node.id)}(${t} value, Traversal work, Action<${t}, bool> complete) {`,
+    settledLookup(c, node.id),
     node.kind === "object"
       ? applyObject(c, needs, node)
       : node.kind === "array"
         ? applyArray(c, node)
         : applyUnion(c, needs, node),
     "}",
+    ...(node.kind === "union"
+      ? node.variants
+          .filter((variant) => needs.has(variant.type.id))
+          .map((variant) => variantStep(c, node, variant))
+      : []),
   );
 }
 
@@ -244,6 +104,8 @@ function applyNode(c: CSharpContext, needs: ReadonlySet<string>, node: ContractT
  */
 export function renderProviderDefaults(c: CSharpContext, needs: ReadonlySet<string>): string {
   if (needs.size === 0) return "";
+  const nodes = c.model.types.filter((node) => needs.has(node.id));
+  const inputs = new Set(c.model.operations.map((operation) => operation.input));
   return lines(
     doc("Provider-only default application that clients and plain codecs never perform"),
     "internal static class ProviderDefaults {",
@@ -267,7 +129,11 @@ export function renderProviderDefaults(c: CSharpContext, needs: ReadonlySet<stri
     `var value = read(document.RootElement, context, "", "http", null);`,
     `return context.IsValid ? value : throw new InvalidOperationException("Invalid generated provider default");`,
     "}",
-    ...c.model.types.filter((node) => needs.has(node.id)).map((node) => applyNode(c, needs, node)),
+    renderTraversal(c, nodes),
+    renderSettlement(nodes, needs),
+    ...nodes.map((node) =>
+      lines(inputs.has(node.id) && applyInput(c, node), applyNode(c, needs, node)),
+    ),
     "}",
   );
 }

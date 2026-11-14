@@ -55,7 +55,7 @@ function typesSource(c: CSharpContext, namespace: string): string {
     header(),
     `namespace ${namespace};`,
     runtime,
-    ...c.model.types.map((node) => renderType(c, node)),
+    ...c.model.types.map((node) => renderType(c, node, needs)),
     renderProviderDefaults(c, needs),
     renderAcceptance(c, needs),
     renderOperationTypes(c),

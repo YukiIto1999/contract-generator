@@ -250,7 +250,7 @@ IPC transport は `Deadline` と末尾の cancellation token を受け取り、H
 codec の内部に型を置くため、契約の最上位名に新しい除外を設けない。
 構造体の default 値は無効であり、factory が呼び出し側の collection をコピーして要素を検証する。
 object、配列、union、provider default の走査には private な作業 stack を使い、契約上の深さ制限を設けない。
-変更のない受理済みの子は同じ値を再利用する。
+既定値を適用した後も子の共有を保ち、値が等しくても別の子は統合せず、変更のない子は再利用する。
 object と provider の受理済み model は、再帰的な等価性や `with` による複製を持つ record ではなく、get-only property を持つ sealed class であり、等価性は参照で決まる。
 配列の値は、不変な内部 storage の同一性で比較する。
 union と outcome の record は網羅できる case を保つが、複合 payload の比較・hash・文字列化では object graph を再帰的にたどらない。

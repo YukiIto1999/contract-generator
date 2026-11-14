@@ -190,6 +190,18 @@ Provider acceptance cases cover deep defaults, dependent default constants, expl
 Lifecycle cases call `Equals`, `GetHashCode`, and `ToString` on 20,000-level values without changing their existing meaning: objects retain reference equality, array wrappers retain immutable backing-storage equality, and union records compare their object payloads with that existing reference equality. A second wrapper around the same union payload is equal; a freshly decoded payload is not.
 These cases are executable specifications; their presence alone is not a native execution result.
 
+## Default sharing
+
+`csharp-default-sharing.test.ts` generates `default-sharing.tsp` with `csharpNamespace: "DefaultSharing"` and runs `SharingDriver.cs`, which references only the generated types project and calls the generated `SettleAcceptance.Accept` as a public consumer.
+The `graph` request accepts one input in which a defaulted object, a defaulted array and a union with a defaulted payload each appear in two members, once more as a distinct equal-valued twin and once already settled.
+Each accepted pair must be one instance (arrays: one backing storage, observed through the public equality of the immutable array wrapper), the twin must stay separate, the settled child must stay the original, explicit null must stay, and the input graph must be unchanged.
+Two union records that wrap the same payload stay two records and share one accepted payload.
+The `untouched` request proves that an input without any applicable default is returned as the same instance.
+The `dag` request builds 20,000-level chains whose every level refers to the level below twice (two optional members, two array elements, two union members) and walks the accepted chain iteratively.
+Every level must hold the default, both references must be one accepted instance, and the input chain must be untouched.
+The driver gives the acceptance a five-second wall-clock allowance and reports `completed: false` instead of waiting, because a child that is unfolded once per path does not finish.
+The last test removes the case label or switch arm of `Tagged.Plain`, one variant of a closed union, from the generated provider-default region of the types source and builds the driver again. The actual compiler must reject it with exactly one error, `CS8509`; the source is restored afterward.
+
 ## Not exercised
 
 - A native Tauri application or UI; IPC is the generic injected transport over a child process.

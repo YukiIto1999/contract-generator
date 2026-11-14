@@ -32,6 +32,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 - Concurrent generators now refuse ownership conflicts instead of racing output replacement or recovering an active publisher's backup; read-only checks do not acquire ownership, and abandoned ownership requires verified manual recovery.
 - Generated C# projects now use exhaustive closed-type switches and ship `csharp/Contract.Analysis.props`; every consumer imports that same analyzer attachment and error policy so omitted variants fail compilation without adding analyzer assemblies to runtime dependencies.
+- C# provider-default dispatch now uses exhaustive switch expressions too. Default application reuses each completed shared child without merging distinct equal-valued children or unfolding a shared DAG into a tree; unchanged inputs keep their identity.
 - Generated C# provider and client projects now attach the dependency's EffectSystem analyzer; `csharp/Contract.EffectAnalysis.props` supplies the same build-time checks to effect consumers.
 - Generated effect consumers also treat `EFFSYS014` and `EFFSYS015` as errors, rejecting a competing deadline timer or replacement of an incoming deadline at native consumer compilation.
 - C# setup instructions now pass dependency paths to referenced projects explicitly.

@@ -6,12 +6,45 @@ import { doc } from "./docs.js";
 import { lines } from "./naming.js";
 import { readIntoUse, writeIntoUse } from "./use-codec.js";
 
+/** Backing-storage identity that provider default application keys settled results on
+ * @param t - Array representation
+ * @returns Internal comparer exposing neither the storage nor element equality
+ */
+function storageIdentity(t: string): string {
+  const comparer = `global::System.Collections.Generic.IEqualityComparer<${t}>`;
+  return lines(
+    doc("Identity of the privately owned storage", [], undefined, {
+      value: "Comparer that equates two arrays only when they share one backing storage",
+    }),
+    `internal static ${comparer} StorageIdentity { get; } = new StorageIdentityComparer();`,
+    doc("Backing-storage identity comparison without element equality or element hashing"),
+    `private sealed class StorageIdentityComparer : ${comparer} {`,
+    doc(
+      "Shared-storage test of two arrays",
+      [
+        ["left", "First array"],
+        ["right", "Second array"],
+      ],
+      "Whether both arrays view the same backing storage",
+    ),
+    `public bool Equals(${t} left, ${t} right) => left._items == right._items;`,
+    doc(
+      "Identity hash of the backing storage",
+      [["value", "Array whose storage identity is hashed"]],
+      "Hash code consistent with storage identity",
+    ),
+    `public int GetHashCode(${t} value) => value._items.GetHashCode();`,
+    "}",
+  );
+}
+
 /** Nominal immutable array representation shared by every array declaration
  * @param c - Target context
  * @param node - Resolved array
+ * @param keyed - Whether provider default application keys settled results on this array's storage
  * @returns Array declaration
  */
-function declaration(c: CSharpContext, node: ArrayType): string {
+function declaration(c: CSharpContext, node: ArrayType, keyed: boolean): string {
   const t = "Value";
   const element = c.use(node.element);
   return lines(
@@ -43,6 +76,7 @@ function declaration(c: CSharpContext, node: ArrayType): string {
       "Completed immutable collection",
     ),
     `internal static ${t} Complete(ImmutableArray<${element}> items) => new(items);`,
+    keyed && storageIdentity(t),
     "}",
   );
 }
@@ -150,14 +184,15 @@ function writeMember(c: CSharpContext, node: ArrayType): string {
 /** Array declaration with validated ownership and typed wire traversal
  * @param c - Target context
  * @param node - Resolved array
+ * @param keyed - Whether provider default application keys settled results on this array's storage
  * @returns Declaration and codec
  */
-export function renderArray(c: CSharpContext, node: ArrayType): string {
+export function renderArray(c: CSharpContext, node: ArrayType, keyed: boolean): string {
   const t = c.type(node.id);
   const element = c.use(node.element);
   const item = useCheck(c, "CheckElement", node.element, "an array element");
   const members = lines(
-    declaration(c, node),
+    declaration(c, node, keyed),
     item.declaration,
     ownershipMembers(c, node, item),
     readMember(c, node, item),
