@@ -27,9 +27,9 @@ The composition root constructs `EffectRuntime` with explicit requirements, a cl
 The IPC transport accepts that same `Deadline` with the cancellation token last; HTTP transports read it through `ContractClient.DeadlineOption`.
 Parent cancellation remains cancellation, while expiration produces the host-selected typed deadline failure. The diagnostics collector records completed executions that overrun their deadline.
 
-Every generated unit and fixture project attaches the existing `TypeModeling.Analyzers` source project as a build-only analyzer (`OutputItemType="Analyzer"`, `ReferenceOutputAssembly="false"`, `PrivateAssets="all"`).
-Its path is derived from `TypeModelingProjectPath` relative to the consuming project, so no analyzer-path setting is required.
-Exhaustiveness diagnostics (`CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847`, and opt-in `TYPMOD021`) are errors. The generated global analyzer configuration reaches consumer projects through the shared import.
+No generated unit or fixture project declares an analyzer reference or imports an analysis file of its own.
+The analyzers reach each of them from the nearest `Directory.Build.props`, which imports `csharp/Contract.Analysis.props` and `csharp/Contract.EffectAnalysis.props`; those import `TypeModeling.Analysis.props` and `EffectSystem.Analysis.props` from the checkouts that `TypeModelingProjectPath` and `EffectSystemProjectPath` name, so the analyzer path is derived from the checkout and no analyzer-path setting is required.
+Exhaustiveness diagnostics (`CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847`, and opt-in `TYPMOD021`) are errors. The generated global analyzer configuration reaches every project through the same import.
 The types-only runtime-dependency test also rejects analyzer and Roslyn assemblies in the output and dependency manifest.
 
 The current source cutover requires native verification against compatible dependency sources. Older fixture execution evidence does not establish compatibility with the new deadline and result APIs.
@@ -96,6 +96,7 @@ For the second contract, generate `features.tsp` with `csharp-namespace` `Featur
 `exhaustiveness.tsp` declares a discriminator union, a mixed-kind enumeration, two successes and two declared rejections.
 `ExhaustivenessProbe.csproj` references all three generated units and compiles one hand-written consumer from `probes/$(Probe).cs`.
 The fixture's `Directory.Build.props` imports the delivered `csharp/Contract.Analysis.props` and, when `EffectSystemProjectPath` is supplied, `csharp/Contract.EffectAnalysis.props`; it does not define separate analyzer references or error policies.
+Each test directory also holds a `Directory.Build.props` above the generated output with the same two imports, which is what the README tells a consumer to write for output outside its own tree.
 The default `ExhaustiveConsumer` matches every public variant without a catchall, including operation failures, provider failures and the runtime's generic `Result`.
 Its executable observes both union and enumeration variants and the ordinary rejection of unknown or null wire inputs.
 The `MissingChoice`, `MissingMixed`, `MissingSuccess`, `MissingRejection`, `MissingFailure`, `MissingProviderFailure`, `GuardedChoice` and `OpenExpression` probes are expected to fail with an exhaustiveness error.
@@ -209,6 +210,15 @@ The last test removes the case label or switch arm of `Tagged.Plain`, one varian
 The driver sends every string through `Decode` and through `Create` and reports acceptance and violations, so an expectation is the vector's membership and never a value that the generator computed.
 A request may carry its text as UTF-16 code units, because JSON text cannot carry an unpaired surrogate.
 Two further scalars observe that a value which broke its length skips its pattern, and an object observes that a failing field does not stop the pattern check of its sibling.
+
+## Shared props tree
+
+`csharp-shared-props.test.ts` builds the layout that the README prescribes: a `Directory.Build.props` at the root of a tree holds the dependency paths and the only import of each analysis file, with the generated output and a consumer below it.
+The builds inherit neither `TypeModelingProjectPath`, `EffectSystemProjectPath` nor `GeneratedContractRoot`, so only that file can supply them to the generated projects and the consumer.
+Each generated unit must build without a warning, the consumer must be held to `CS8509`, `TYPMOD021` and `EFFSYS008`, and MSBuild's evaluation of every project must name each analyzer project once, through the analysis props that the TypeModeling and EffectSystem checkouts own.
+A second consumer imports `EffectSystem.Analysis.props` before the generated files; its evaluation must still name each analyzer project once, with no repeated-import warning (MSB4011).
+`csharp-outside-tree.test.ts` places generated output where no `Directory.Build.props` is above it: the units must attach no analyzer of their own, and must still build when the environment names the dependency paths, with only the `CS8509` warnings that the TypeModeling analyzer suppresses in an analyzed tree.
+The other tests place the generated output beside the fixture directory, outside the tree of its `Directory.Build.props`, under a `Directory.Build.props` that the test directory holds above the output.
 
 ## Not exercised
 

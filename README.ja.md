@@ -207,15 +207,19 @@ pattern のない module は RE2JS を import しない。
 
 ### C#
 
-生成する project は、[TypeModeling `v0.3.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.3.0) と [EffectSystem `v0.3.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.3.0) の source を参照する。
+生成する project は、[TypeModeling `v0.4.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.4.0) と [EffectSystem `v0.4.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.4.0) の source を参照する。
 二つの checkout は `typemodeling-dotnet/` と `effectsystem-dotnet/` の名前で隣に並べる。
-project の絶対 path は、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` として、command line の global property か環境変数で渡す。
+project の絶対 path は、利用側の `Directory.Build.props` に、MSBuild の property `TypeModelingProjectPath` と `EffectSystemProjectPath` として一度だけ書く。
+`Directory.Build.props` は、MSBuild が各 project の directory から親へたどって最初に見つけた一つを自動で import する。
+そのため、同じ tree の全 project に、同じ設定が届く。
 利用側の `.csproj` だけに置いた property は参照先へ伝わらない。
-共有する `Directory.Build.props` から渡す場合は、生成した project にもその設定が適用される配置にする。
-生成する三つの project は `csharp/Contract.Analysis.props` を import し、既存の `TypeModeling.Analyzers` を参照して網羅性の診断をエラーにする。
+生成する project は利用側の通常の project であり、analyzer への参照も props の import も自身では持たない。
+その `Directory.Build.props` の下にある全ての C# project は、生成したものも手で書いたものも、その file が import する props から analyzer を受け取る。
+そのため import は、project ごとには書かず、利用側の repository の root にある `Directory.Build.props` に一度だけ書く。
+`csharp/Contract.Analysis.props` は、`TypeModelingProjectPath` が指す TypeModeling の checkout から `TypeModeling.Analysis.props` を import し、全ての C# project に `TypeModeling.Analyzers` を届ける。
 analyzer の assembly は実行時の依存には含めない。
-MSBuild の project 参照では analyzer の参照と警告の方針が伝播しないため、利用側の各 project も同じ生成ファイルを import する。
-利用側の SDK project 内で、`GeneratedContractRoot` をその project から見た生成出力への相対 path とし、次を追加する。
+この file が足すのは生成した契約に固有のものだけで、`CS8509`、`CS8524`、`CS8655`、`CS8846`、`CS8847`、`TYPMOD021` をエラーにし、生成した global analyzer configuration で `TYPMOD021` を有効にする。
+`/absolute/path` は二つの source checkout がある directory に、`generated` は生成出力の directory に置き換える。
 
 ```xml
 <Project>
@@ -237,8 +241,25 @@ MSBuild の project 参照では analyzer の参照と警告の方針が伝播�
 </ItemGroup>
 ```
 
+`dotnet build` に property を渡す必要はない。
+`Directory.Build.props` は生成出力の file を import するので、build の前に生成を終えておく。
+生成出力を `Directory.Build.props` の directory の下に置くと、生成した project にも同じ設定が届く。
+生成した project は自身では何も import しない。
+出力をその tree の外に置くと、生成した project に `Directory.Build.props` が届かないので、依存の path を環境変数か `dotnet build` の `-p:` で渡した場合だけ build できる。
+その出力には analyzer もエラーの方針も届かず、何も検査されない。
+analyzer がないと、compiler は閉じた型に対して生成した switch に `CS8509` を報告するので、その build はこの警告を出し、`TreatWarningsAsErrors` では失敗する。
+検査するには、生成した directory の上に、上の例と同じ二つの import を持つ `Directory.Build.props` を置く。
+`Directory.Build.props` が複数の階層にあるときに MSBuild が使うのは、最も近い一つだけである。
+上の階層の設定も使うには、近い file の先頭で `<Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />` を import する。
+
+types の単位だけを使う consumer では、`EffectSystemProjectPath` と `Contract.EffectAnalysis.props` の import を省ける。
+`csharp/Contract.EffectAnalysis.props` は、`EffectSystemProjectPath` が指す EffectSystem の checkout から `EffectSystem.Analysis.props` を import して `EffectSystem.Analyzers` を届け、`EFFSYS001` から `EFFSYS015` をエラーにする。
+`Effect` を使う consumer は、上の例のとおり、`Contract.Analysis.props` の後にこの import を持つ。
 どちらの import も、analyzer の assembly を実行時の依存には含めない。
-共有した import は、analyzer の project がない場合に検査を黙って省かず、エラーにする。
+生成した二つの file は、持ち主の props がそれまでに import されていない場合だけ import するので、`Directory.Build.props` が `TypeModeling.Analysis.props` や `EffectSystem.Analysis.props` を先に import していても、各 analyzer の取り込みは 1 回のままである。
+analyzer が欠けるか止まると、build は持ち主の診断(`TYPMOD201` から `TYPMOD203`、`TYPMOD022`、`EFFSYS201`、`EFFSYS202`、`EFFSYS016`)で失敗する。
+checkout の root に props がない場合は、project の path を指す property の名前を挙げたエラーで失敗する。
+props が届かなかった project を solution の build で失敗させるには、持ち主の README が示す `Directory.Solution.targets` を置く。
 閉じた型の switch は全 variant を列挙し、default・discard の arm を置かない。
 生成する global analyzer configuration は `TYPMOD021` を有効にし、閉じた型に対する明示的な catchall arm を拒否する。
 利用側にも `Contract.Analysis.props` を通して設定が届くため、新しい variant には明示的な case の追加が必要になる。
@@ -341,21 +362,6 @@ emitter の事前検査より前に、TypeSpec 1.17.0 の `@pattern` decorator �
 この decorator 自体は照合しない。
 生成器が所有する照合を置き換えても、frontend の native 正規表現の parse はなくならず、任意の悪意ある compiler 入力に対する処理全体の resource 上限を保証するものではない。
 
-値の種類を調べた後、その値の code point 長や UUID の検査に違反があれば、同じ値の pattern 検査を省ける。
-その違反は残し、兄弟項目と独立した field の検証は続ける。
-一つの値で失敗する全規則を列挙する保証はない。
-pattern を実行して不一致だった場合は、引き続き `format` 違反となる。
-pattern の検証にも共通の結果型を使う。
-成功は受理した値と未知項目の診断を持ち、失敗は違反と検出済みの診断を保持して、部分的に受理した値を返さない。
-
-内部モデルと JSON Schema・OpenAPI の投影には、翻訳後の RE2JS の式ではなく元の ECMAScript source を残す。
-外部 schema validator の実行安全性はその利用側が所有し、生成 runtime の保証は引き継がれない。
-browser や Tauri の互換性は、生成物と必要な依存を組み込んだ対象環境で確かめる。
-
-IPC の binding は、host が供給する transport の上の要求と応答である。
-fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。
-desktop fixture の対象は GTK3 と WebKitGTK 4.1 を使う Linux であり、Windows、macOS、mobile での受入を示すものではない。
-
 生成 C# は元の文字列を、異なる pattern source ごとに `Wire` の static field で一度だけ構築した、`RegexOptions.NonBacktracking` の `Regex` で照合する。
 照合は `IsMatch` による部分一致であり、`^` と `$` は `\A` と `\z` に翻訳するので、`^a$` は `"a\n"` に一致しない。
 C# の直接 render も、共通 profile の適格性に失敗した式を `unsupported-csharp` として拒否する。
@@ -377,6 +383,21 @@ BMP の literal と、補助面を含まない文字集合は 1、補助面の l
 このため `^.{666}$` と `^[a-z]{1000}$` は受理し、`^.{667}$` と `^(?:ab){1000}$` は拒否する。
 .NET は選択肢の併合などで見積りを小さくすることがあるため、拒否する式の一部は .NET 自身なら構築できる。
 host が AppContext の `REGEX_NONBACKTRACKING_MAX_AUTOMATA_SIZE` を既定の 10000 より小さくすると、受理した式の構築が失敗し得るので、下げてはならない。
+
+値の種類を調べた後、その値の code point 長や UUID の検査に違反があれば、同じ値の pattern 検査を省ける。
+その違反は残し、兄弟項目と独立した field の検証は続ける。
+一つの値で失敗する全規則を列挙する保証はない。
+pattern を実行して不一致だった場合は、引き続き `format` 違反となる。
+pattern の検証にも共通の結果型を使う。
+成功は受理した値と未知項目の診断を持ち、失敗は違反と検出済みの診断を保持して、部分的に受理した値を返さない。
+
+内部モデルと JSON Schema・OpenAPI の投影には、翻訳後の RE2JS の式ではなく元の ECMAScript source を残す。
+外部 schema validator の実行安全性はその利用側が所有し、生成 runtime の保証は引き継がれない。
+browser や Tauri の互換性は、生成物と必要な依存を組み込んだ対象環境で確かめる。
+
+IPC の binding は、host が供給する transport の上の要求と応答である。
+fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。
+desktop fixture の対象は GTK3 と WebKitGTK 4.1 を使う Linux であり、Windows、macOS、mobile での受入を示すものではない。
 
 ## 検証
 

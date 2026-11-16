@@ -9,6 +9,7 @@ import { renderCSharp } from "../../../src/targets/csharp/render-csharp.js";
 import { options } from "../../../src/targets/csharp/test-models.js";
 import { auditReceiptProblem, requireAuditedPackages } from "./csharp-audit.js";
 import { contractModel } from "./csharp-contract.js";
+import { outputTreeProps } from "./csharp-output-tree.js";
 
 /** Independent fixture directory shipped with the generator tests */
 const fixtureSource = fileURLToPath(new URL("../../fixtures/csharp/", import.meta.url));
@@ -88,7 +89,7 @@ export interface CSharpFixture {
   readonly artifactsRoot: string;
 }
 
-/** Writing generated files and a clean fixture-project copy into a test-owned directory
+/** Writing generated files, the consumer's `Directory.Build.props` above them, and a clean fixture-project copy into a test-owned directory
  * @param root - Existing empty test-owned directory
  * @param files - Complete generated C# files with `csharp/` paths
  * @returns Locations for the native builds
@@ -105,6 +106,7 @@ export async function provisionCSharpFixture(
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, file.content);
   }
+  await writeFile(join(root, "Directory.Build.props"), outputTreeProps);
   await cp(fixtureSource, fixtureRoot, {
     recursive: true,
     filter: (source) => !/^(bin|obj|artifacts)$/.test(source.split("/").pop() ?? ""),
@@ -144,14 +146,21 @@ function parseDiagnostics(output: string): readonly BuildDiagnostic[] {
 /** One native `dotnet` command in the fixture copy
  * @param fixture - Provisioned directories
  * @param args - Command line after the `dotnet` executable
+ * @param without - Environment variables that the command must not inherit
  * @returns Exit status and unique diagnostics
  */
-function runDotnet(fixture: CSharpFixture, args: readonly string[]): NativeBuild {
+export function runDotnet(
+  fixture: CSharpFixture,
+  args: readonly string[],
+  without: readonly string[],
+): NativeBuild {
   const run = spawnSync("dotnet", args, {
     cwd: fixture.fixtureRoot,
     encoding: "utf8",
     timeout: 600_000,
-    env: nativeEnvironment,
+    env: Object.fromEntries(
+      Object.entries(nativeEnvironment).filter(([name]) => !without.includes(name)),
+    ),
   });
   const output = `${run.stdout}${run.stderr}`;
   return {
@@ -161,6 +170,14 @@ function runDotnet(fixture: CSharpFixture, args: readonly string[]): NativeBuild
   };
 }
 
+/** What a build takes from its caller rather than from the project tree */
+export interface BuildConfiguration {
+  /** Environment variables that the build must not inherit, so that the tree has to supply them */
+  readonly without?: readonly string[];
+  /** Whether the build passes `GeneratedContractRoot` as a global property; false leaves it to the tree */
+  readonly generatedRoot?: boolean;
+}
+
 /** Native build of one fixture project against the generated contract
  *
  * The restore runs offline: the medium sandbox has no route to a NuGet source, so it cannot obtain the vulnerability data that a restore audit needs.
@@ -168,6 +185,7 @@ function runDotnet(fixture: CSharpFixture, args: readonly string[]): NativeBuild
  * @param fixture - Provisioned directories whose artifacts root receives every output, including those of referenced dependency projects
  * @param project - Project file name inside the fixture copy
  * @param properties - Additional MSBuild properties
+ * @param configuration - What the build must find in the project tree instead of receiving it
  * @returns Exit status and unique diagnostics of the restore and the build without restore
  * @throws {@link Error} A restore that resolved a package which `npm run audit:native` did not audit
  */
@@ -175,21 +193,22 @@ export function buildCSharpProject(
   fixture: CSharpFixture,
   project: string,
   properties: Readonly<Record<string, string>> = {},
+  { without = [], generatedRoot = true }: BuildConfiguration = {},
 ): NativeBuild {
   const shared = [
     join(fixture.fixtureRoot, project),
     "--artifacts-path",
     fixture.artifactsRoot,
-    `-p:GeneratedContractRoot=${fixture.generatedRoot}`,
+    ...(generatedRoot ? [`-p:GeneratedContractRoot=${fixture.generatedRoot}`] : []),
     ...Object.entries(properties).map(([key, value]) => `-p:${key}=${value}`),
     "--disable-build-servers",
     "-nologo",
     "-v:minimal",
   ];
-  const restore = runDotnet(fixture, ["restore", ...shared, "-p:NuGetAudit=false"]);
+  const restore = runDotnet(fixture, ["restore", ...shared, "-p:NuGetAudit=false"], without);
   if (restore.status !== 0) return restore;
   requireAuditedPackages(fixture.artifactsRoot);
-  const build = runDotnet(fixture, ["build", ...shared, "--no-restore"]);
+  const build = runDotnet(fixture, ["build", ...shared, "--no-restore"], without);
   const output = `${restore.output}${build.output}`;
   return { status: build.status, diagnostics: parseDiagnostics(output), output };
 }

@@ -34,9 +34,10 @@ driftの検査は所有の取得・解放や中断からの復旧を行わず、
 型の役割の違いは相互代入できない型で表し、aliasは同じ型への参照として扱う。
 fieldの通常の制約だけを理由にwrapperを増やさない。
 C#の閉じた結果の分岐は、既存analyzerで網羅性を検査するswitch式を使い、default・discardで未処理のvariantを隠さない。
-網羅性のanalyzer参照とエラー設定は、生成したprojectと利用側のprojectが同じ生成済みの設定をimportして適用する。
+網羅性のanalyzerは、持ち主のanalysis propsを通して全てのC# projectへ届き、エラー設定は生成した設定を利用側が一度importして適用する。
+生成したprojectは利用側のprojectと同じ扱いで、analyzerの参照もimportも自身では持たない。
 検証専用の設定で利用側への配布不足を補わない。
-Effectを使うC#の公開単位とそのconsumerは、同じ生成済みの設定からEffectSystem.Analyzersも適用し、未構築のEffectなどの利用規則違反をcompile時のエラーにする。
+Effectを使うC#のprojectは、持ち主のanalysis propsを通してEffectSystem.Analyzersも適用し、未構築のEffectなどの利用規則違反をcompile時のエラーにする。
 任意精度の数値や日時の字句保持に必要な表現は、役割を区別する型とは別の判断として選ぶ。
 必要なprofileには、object、配列、判別子付きunion、literal、nullable、optional、UUID、Unicode code point単位の長さ、整数の値域、正確な十進数、offset付き日時、bytesを含める。
 安全整数範囲外の整数、小数秒の精度、日時のoffset、年0000、うるう秒を生成先の既定型の都合で欠落させない。

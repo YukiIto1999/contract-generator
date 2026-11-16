@@ -4,8 +4,8 @@ inputs:
   devenv:
     url: github:cachix/devenv/5f5109c83854577191634f7b86fc6e0c8fd44964?dir=src/modules
   typemodeling-dotnet:
-    url: github:YukiIto1999/typemodeling-dotnet/fd70476a34060015d0756f92d746e6b762f491ae
+    url: github:YukiIto1999/typemodeling-dotnet/dfc979ff3328aadc4a750e176f818370ee1be734
     flake: false
   effectsystem-dotnet:
-    url: github:YukiIto1999/effectsystem-dotnet/3eee917384d87caed78fc91b786437ec6125eff9
+    url: github:YukiIto1999/effectsystem-dotnet/1510fc7dd6bced937345c527f00decea1c2bfab7
     flake: false
