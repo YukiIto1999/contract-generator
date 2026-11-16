@@ -138,6 +138,8 @@ Rust の最小版のための別の test は置かず、同じ `rust` collection
 `npm test` と開発中の fixture helper は、この変数がなければ `rustMinimumVersion` 以上の版を受け入れる。
 Rust と WebView の初回の依存取得は受入走行と分け、[fixture の手順](./tests/fixtures/tauri/README.md) に従う。
 検証入口は `RUST_CONTRACT_FETCH=0` を設定し、受入の途中で Rust の依存を取得しない。
+devenv は `RUST_CONTRACT_TARGET_DIR` を Git の追跡対象外の `work/rust-target/` に設定し、生成 crate の Rust の受入は fixture ごとの target を走行の間で共有する。
+走行ごとの一時 target では、毎回すべての依存を compile し直すためである。
 
 ### 証跡の再利用
 

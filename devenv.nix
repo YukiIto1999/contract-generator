@@ -36,6 +36,8 @@
     CONTRACT_GENERATOR_EFFECTSYSTEM_SOURCE = "${inputs.effectsystem-dotnet}";
     TypeModelingProjectPath = "${config.devenv.root}/work/native-dependencies/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj";
     EffectSystemProjectPath = "${config.devenv.root}/work/native-dependencies/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj";
+    # A temporary target per run is not used: it recompiles every dependency of the generated crates on each Rust acceptance.
+    RUST_CONTRACT_TARGET_DIR = "${config.devenv.root}/work/rust-target";
   };
 
   # The environment's verification gate calls `devenv shell -- verify`; the npm script stays the single definition of the checks.
