@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import type { Result } from "ts-results-es";
 import type { ContractModel, Constraints } from "../../model/contract-model.js";
+import { adversarialCases as patterns } from "../../model/patterns/semantic-vectors.fixture.js";
 import { loadGenerated } from "./load-generated.js";
 import { member, objectType, scalarType } from "./model-builders.js";
 
@@ -22,19 +23,6 @@ interface Codec {
   decode(text: string): Outcome;
   fromWire(value: unknown): Outcome;
 }
-
-/** Admitted fixed patterns with explicit matching and failing witnesses */
-const patterns = [
-  { name: "Nested", pattern: "^(a+)+$", yes: "a".repeat(16384), no: "a".repeat(16384) + "!" },
-  {
-    name: "Overlapping",
-    pattern: "^(a|aa)+$",
-    yes: "a".repeat(16384),
-    no: "a".repeat(16384) + "!",
-  },
-  { name: "Nullable", pattern: "^(a*)*b$", yes: "a".repeat(16384) + "b", no: "a".repeat(16384) },
-  { name: "Unanchored", pattern: "a+a+$", yes: "baaa", no: "a".repeat(16384) + "!" },
-] as const;
 
 /** Real generated module without a hostile native RegExp oracle */
 const contract = loadGenerated({

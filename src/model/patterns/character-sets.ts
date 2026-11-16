@@ -3,7 +3,7 @@ import { Ok, type Result } from "ts-results-es";
 import { unsupported, type PatternIssue } from "./pattern-issue.js";
 
 /** Inclusive codepoint interval without Unicode normalization */
-type Range = readonly [number, number];
+export type Range = readonly [number, number];
 
 /** ECMAScript WhiteSpace and LineTerminator codepoints under the Unicode flag */
 const whitespace: readonly Range[] = [
@@ -140,14 +140,14 @@ function rangesSource(ranges: readonly Range[]): string {
 }
 
 /**
- * Exact dot and ordinary character class translation
+ * Exact dot and ordinary character class as canonical intervals
  * @param node - Parsed class or character set
- * @returns Equivalent RE2JS atom or a blocking capability issue
+ * @returns Sorted disjoint intervals over every codepoint or a blocking capability issue
  */
-export function characterSetSource(
+export function characterSetRanges(
   node: AST.CharacterClass | AST.CharacterSet,
-): Result<string, PatternIssue> {
-  if (node.type === "CharacterSet") return setRanges(node).map(rangesSource);
+): Result<readonly Range[], PatternIssue> {
+  if (node.type === "CharacterSet") return setRanges(node);
   if (node.unicodeSets) return unsupported(node, "Unicode set operations are unsupported");
   const ranges: Range[] = [];
   for (const element of node.elements) {
@@ -156,5 +156,16 @@ export function characterSetSource(
     for (const range of result.value) ranges.push(range);
   }
   const merged = union(ranges);
-  return Ok(rangesSource(node.negate ? complement(merged) : merged));
+  return Ok(node.negate ? complement(merged) : merged);
+}
+
+/**
+ * Exact dot and ordinary character class translation
+ * @param node - Parsed class or character set
+ * @returns Equivalent RE2JS atom or a blocking capability issue
+ */
+export function characterSetSource(
+  node: AST.CharacterClass | AST.CharacterSet,
+): Result<string, PatternIssue> {
+  return characterSetRanges(node).map(rangesSource);
 }

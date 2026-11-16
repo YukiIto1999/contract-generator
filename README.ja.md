@@ -218,29 +218,23 @@ MSBuild の project 参照では analyzer の参照と警告の方針が伝播�
 利用側の SDK project 内で、`GeneratedContractRoot` をその project から見た生成出力への相対 path とし、次を追加する。
 
 ```xml
-<PropertyGroup>
-  <GeneratedContractRoot>../generated</GeneratedContractRoot>
-</PropertyGroup>
-<Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+<Project>
+  <PropertyGroup>
+    <TypeModelingProjectPath>/absolute/path/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj</TypeModelingProjectPath>
+    <EffectSystemProjectPath>/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj</EffectSystemProjectPath>
+    <GeneratedContractRoot>$(MSBuildThisFileDirectory)generated</GeneratedContractRoot>
+  </PropertyGroup>
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" />
+</Project>
+```
+
+利用側の `.csproj` は import を持たず、生成した project への参照だけを追加する。
+
+```xml
 <ItemGroup>
   <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
 </ItemGroup>
-```
-
-利用側の project の directory から次を実行し、`/absolute/path` は二つの source checkout がある directory に置き換える。
-
-```sh
-dotnet build Consumer.csproj \
-  -p:TypeModelingProjectPath=/absolute/path/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj \
-  -p:EffectSystemProjectPath=/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj
-```
-
-types の単位だけを使う consumer では、`EffectSystemProjectPath` を省ける。
-生成する provider と client は、`EffectSystem.Analyzers` を参照して利用規則の診断をエラーにする `csharp/Contract.EffectAnalysis.props` も import する。
-`Effect` を使う consumer は、`Contract.Analysis.props` の後に次の import を加える。
-
-```xml
-<Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" />
 ```
 
 どちらの import も、analyzer の assembly を実行時の依存には含めない。
@@ -296,16 +290,17 @@ edition の下限は、その compiler での動作を確認した値ではな�
 
 次のものは、emitter が宣言の位置で報告し、何も生成しない。
 
-| 制限                                                                           | 対象                                                                |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `unixTimestamp` の encoding                                                    | C#、Rust                                                            |
-| 下記の安全な共通 profile に含まれない `@pattern`                               | Rust だけを生成する場合も含め、全言語                               |
-| 共通 profile 内の `@pattern`                                                   | C# は引き続き未対応。Rust は `regex` に等価な表現がある場合だけ対応 |
-| boolean か bytes の scalar に付けた `@preserveLexical`                         | Rust                                                                |
-| 標準の九つの method 以外の HTTP method                                         | Rust                                                                |
-| path・query・header に置いた nullable な引数                                   | 全言語                                                              |
-| nullable な raw binary の body                                                 | 全言語                                                              |
-| `const` か alias を経由して参照した、binary64 の範囲を越える相異なる二つの数値 | 全言語(TypeSpec 1.17 が元の綴りを公開しないため)                    |
+| 制限                                                                                  | 対象                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `unixTimestamp` の encoding                                                           | C#、Rust                                         |
+| 下記の安全な共通 profile に含まれない `@pattern`                                      | Rust だけを生成する場合も含め、全言語            |
+| 共通 profile 内の `@pattern`                                                          | Rust は `regex` に等価な表現がある場合だけ対応   |
+| 共通 profile 内で、.NET の非 backtracking engine の見積りが 10000 を超える `@pattern` | C#                                               |
+| boolean か bytes の scalar に付けた `@preserveLexical`                                | Rust                                             |
+| 標準の九つの method 以外の HTTP method                                                | Rust                                             |
+| path・query・header に置いた nullable な引数                                          | 全言語                                           |
+| nullable な raw binary の body                                                        | 全言語                                           |
+| `const` か alias を経由して参照した、binary64 の範囲を越える相異なる二つの数値        | 全言語(TypeSpec 1.17 が元の綴りを公開しないため) |
 
 要求 body 自体が bytes の場合は、bytes のまま送る。
 JSON で運ぶ場合は、`model Upload { data: bytes; }` のように object の field に bytes を置く。
@@ -319,7 +314,7 @@ body は JSON になり、その field は宣言した wire encoding に従う�
 他の flag は使わない。
 この制限は TypeScript の生成部だけでなく、共通の記述 profile 全体に適用する。
 Rust の engine で実行できる式でも、Rust だけを生成する前に拒否されることがある。
-C# は引き続き全 pattern を拒否し、Rust には生成先固有の追加制限が残る。
+Rust と C# には、生成先固有の追加制限が残る。
 
 対応するのは、Unicode scalar の literal と escape（正しく対になった surrogate escape を含む）、連結、空の選択肢を含む選択、通常・非捕捉・名前付きの group、および engine の compile 制限内の貪欲・非貪欲な `?`、`*`、`+`、回数指定である。
 検証結果は真偽値だけなので、捕捉と捕捉名は除去する。
@@ -360,6 +355,28 @@ browser や Tauri の互換性は、生成物と必要な依存を組み込ん�
 IPC の binding は、host が供給する transport の上の要求と応答である。
 fixture には、汎用の別 process 間 transport と、生成した TypeScript consumer から Rust の provider dispatch へ接続する[実 Tauri/Wry webview](./tests/fixtures/tauri/README.md)がある。
 desktop fixture の対象は GTK3 と WebKitGTK 4.1 を使う Linux であり、Windows、macOS、mobile での受入を示すものではない。
+
+生成 C# は元の文字列を、異なる pattern source ごとに `Wire` の static field で一度だけ構築した、`RegexOptions.NonBacktracking` の `Regex` で照合する。
+照合は `IsMatch` による部分一致であり、`^` と `$` は `\A` と `\z` に翻訳するので、`^a$` は `"a\n"` に一致しない。
+C# の直接 render も、共通 profile の適格性に失敗した式を `unsupported-csharp` として拒否する。
+.NET の正規表現は UTF-16 の code unit を読むため、生成器は共通の構文木から式を翻訳し直し、literal と文字集合を、補助面を surrogate pair の選択肢で表す式にする。
+pair は分割して一致させず、dot と補集合も一つの code point として読む。
+孤立した surrogate を含む文字列は、pattern より前の code point の検査が `format` 違反として拒否するので、式が孤立した surrogate を読むことはない。
+lazy の印は真偽値の判定を変えないので省く。
+空の選択肢を持つ group は、他の選択肢の省略可能な group として書く。
+.NET の木の簡約が `(?:a+|)+` の下限を落として空の入力を拒否するためである。
+契約に書かれた式を backtracking の engine で実行せず、そこへ fallback しない。
+受理した固定の式に対する破局的なバックトラッキングを除く保証であり、入力の長さ、field 数、式の数に対する総作業量の上限を保証するものではない。
+
+.NET は非 backtracking engine の構築の前に automaton の大きさを見積もり、既定の上限 10000 を超える式では `NotSupportedException` を投げる。
+生成器は同じ見積りの上界を求め、超える式を、宣言位置付きの `unsupported-csharp` として C# の生成だけで拒否する。
+見積りは、counted repetition を展開して数えた literal と文字集合の数に 1 を足した値であり、式が `^` か `$` を含む場合はその 5 倍である。
+BMP の literal と、補助面を含まない文字集合は 1、補助面の literal は 2 と数える。
+補助面を含む文字集合は、BMP の部分があれば 1 と、補助面を表す surrogate pair の選択肢ごとに 2 を数え、dot は 3 になる。
+`?` と `*` は本体を 1 回、`+` は 2 回、`{n}` と `{m,n}` は n 回、`{m,}` は m + 1 回数える。
+このため `^.{666}$` と `^[a-z]{1000}$` は受理し、`^.{667}$` と `^(?:ab){1000}$` は拒否する。
+.NET は選択肢の併合などで見積りを小さくすることがあるため、拒否する式の一部は .NET 自身なら構築できる。
+host が AppContext の `REGEX_NONBACKTRACKING_MAX_AUTOMATA_SIZE` を既定の 10000 より小さくすると、受理した式の構築が失敗し得るので、下げてはならない。
 
 ## 検証
 

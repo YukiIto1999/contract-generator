@@ -146,6 +146,29 @@ export function rustFixtureFiles(
   ];
 }
 
+/** Generated product plus a types-only codec crate whose observation source the caller supplies
+ * @param model - Canonical profile output
+ * @param options - Target integration options
+ * @param codec - Source of the crate's `codec.rs`, which names the generated codecs it observes
+ * @returns Generated product files and the test-only native codec consumer
+ * @throws Error when the generator refuses the contract, which is itself a failure of the fixture
+ */
+export function rustCodecFiles(
+  model: ContractModel,
+  options: EmissionOptions,
+  codec: string,
+): readonly GeneratedFile[] {
+  return [
+    ...generated(model, options),
+    { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(options.rustCratePrefix, []) },
+    {
+      path: "rust/fixture-codec/src/main.rs",
+      content: source("common/codec_main.rs", rustRecursionLimit(model)),
+    },
+    { path: "rust/fixture-codec/src/codec.rs", content: codec },
+  ];
+}
+
 /** Generated product plus the types-only codec crate of the source-data contract
  * @param model - Canonical profile output
  * @param options - Target integration options
@@ -156,13 +179,5 @@ export function rustSourceDataFiles(
   model: ContractModel,
   options: EmissionOptions,
 ): readonly GeneratedFile[] {
-  return [
-    ...generated(model, options),
-    { path: "rust/fixture-codec/Cargo.toml", content: codecManifest(options.rustCratePrefix, []) },
-    {
-      path: "rust/fixture-codec/src/main.rs",
-      content: source("common/codec_main.rs", rustRecursionLimit(model)),
-    },
-    { path: "rust/fixture-codec/src/codec.rs", content: source("source-data/codec.rs") },
-  ];
+  return rustCodecFiles(model, options, source("source-data/codec.rs"));
 }

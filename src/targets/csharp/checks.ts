@@ -2,6 +2,7 @@ import type { Constraints, TypeUse } from "../../model/contract-model.js";
 import type { CSharpContext } from "./context.js";
 import { doc } from "./docs.js";
 import { lines, quote } from "./naming.js";
+import { patternReference } from "./patterns.js";
 
 /** Scalar meanings whose standard C# storage prints as an invariant integer */
 const integerScalars: Readonly<Record<string, true>> = {
@@ -85,7 +86,7 @@ export function constraints(
   const countable = node.kind === "array" || scalar?.scalar === "bytes";
   return lines(
     textual &&
-      `Wire.Text(${value}, ${rules.minLength ?? "null"}, ${rules.maxLength ?? "null"}, ${rules.format === "uuid"}, c, ${path});`,
+      `Wire.Text(${value}, ${rules.minLength ?? "null"}, ${rules.maxLength ?? "null"}, ${rules.format === "uuid"}, ${patternReference(c, rules.pattern)}, c, ${path});`,
     countable && itemConstraints(rules, value, path),
     rangeConstraint(c, id, rules, value, path),
   );

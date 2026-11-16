@@ -1,6 +1,7 @@
 import { RegExpParser, RegExpSyntaxError, type AST } from "@eslint-community/regexpp";
 import { RE2JS, RE2JSCompileException, RE2JSSyntaxException } from "re2js";
 import { Err, Ok, type Result } from "ts-results-es";
+import { dotnetPattern, type DotNetPattern } from "./dotnet-translation.js";
 import type { PatternIssue } from "./pattern-issue.js";
 import { translatePattern } from "./pattern-translation.js";
 
@@ -59,4 +60,16 @@ function compilePattern(source: string): Result<PreparedPattern, PatternIssue> {
  */
 export function preparePattern(source: string): Result<PreparedPattern, PatternIssue> {
   return parsePattern(source).andThen(translatePattern).andThen(compilePattern);
+}
+
+/**
+ * .NET non-backtracking eligibility, which holds a pattern to the common profile first
+ * @param source - Original ECMAScript Unicode pattern without other flags
+ * @returns Expression for `RegexOptions.NonBacktracking` or a blocking issue
+ * @throws {@link Error} Unexpected parser or engine defect
+ */
+export function prepareDotNetPattern(source: string): Result<DotNetPattern, PatternIssue> {
+  return preparePattern(source)
+    .andThen(() => parsePattern(source))
+    .andThen(dotnetPattern);
 }
