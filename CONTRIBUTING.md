@@ -68,8 +68,8 @@ TypeSpec の decorator を解釈するのは `src/profile/` だけであり、�
 
 検証は、`devenv shell` の中で、リポジトリの root にある package scripts を入口にする。
 作業単位の確定前には T1 を、push と release の前には T2 を使う。
-環境の T1 の門と pre-push hook は、devenv の `scripts.verify` と `scripts.verify-push` を通じて、同じ入口を `devenv shell -- verify` と `devenv shell -- verify-push` で呼ぶ。
-この二つの script は package scripts を呼ぶだけであり、検査の定義は package scripts だけに置く。
+環境の T1 の門と pre-push hook は、`devenv.nix` を持つリポジトリの package scripts を devenv の中で呼ぶため、同じ入口を `devenv shell -- npm run verify` と `devenv shell -- npm run verify:push` で呼ぶ。
+検査の定義は package scripts だけに置く。
 
 | 段                 | 入口                  | 確認する保証                                                                                                                                                              |
 | ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,7 +79,7 @@ TypeSpec の decorator を解釈するのは `src/profile/` だけであり、�
 
 T2 は T1 や全 test の入口を再帰的に呼ばず、検査ごとに証跡を照合する。
 独立した継続評価の workload は採用していないため、同じ全 test を再実行するだけの T3 と `verify:full` は定義しない。
-pre-push hook は `devenv shell -- verify-push` を通じて T2 を呼び、CI から呼ぶ場合も devenv の中で `npm run verify:push` を使い、その環境に必要な受入の証跡がなければ実行する。
+pre-push hook は `devenv shell -- npm run verify:push` で T2 を呼び、CI から呼ぶ場合も devenv の中で `npm run verify:push` を使い、その環境に必要な受入の証跡がなければ実行する。
 このリポジトリは Git の global hook 設定を変更しない。
 
 ### 選択と失敗
@@ -138,6 +138,8 @@ Rust の最小版のための別の test は置かず、同じ `rust` collection
 `npm test` と開発中の fixture helper は、この変数がなければ `rustMinimumVersion` 以上の版を受け入れる。
 Rust と WebView の初回の依存取得は受入走行と分け、[fixture の手順](./tests/fixtures/tauri/README.md) に従う。
 検証入口は `RUST_CONTRACT_FETCH=0` を設定し、受入の途中で Rust の依存を取得しない。
+devenv は `RUST_CONTRACT_TARGET_DIR` を Git の追跡対象外の `work/rust-target/` に設定し、生成 crate の Rust の受入は fixture ごとの target を走行の間で共有する。
+走行ごとの一時 target では、毎回すべての依存を compile し直すためである。
 
 ### 証跡の再利用
 
@@ -158,9 +160,9 @@ source と入力は検査の前後で照合し、途中で変わった検査に�
 無関係な README の変更だけでは native の証跡を失効させないが、format の入力が変わるため `check` は再実行する。
 tool の存在と版は再利用の前にも調べ、必要な tool が消えた実行を過去の成功で通さない。
 解決できない user・親 directory の native tool 設定は内容に秘密を含み得るため hash せず、その設定を読む検査の再利用だけを止める。
-C# の検査は、user の NuGet 設定（`~/.nuget/NuGet/NuGet.Config`、`~/.config/NuGet/NuGet.Config`）と、依存 source の親 directory にある MSBuild・NuGet の設定で再利用を止める。
-Rust の検査は、`$CARGO_HOME` の Cargo 設定（`config.toml`、`config`）で再利用を止める。
-NuGet の設定は Rust の検査に、Cargo の設定は C# の検査に関わらないため、互いの再利用を止めない。
+C# の受入の restore は `--configfile` で [`tests/fixtures/csharp/offline.nuget.config`](./tests/fixtures/csharp/offline.nuget.config) だけを読むため、user と親 directory の NuGet 設定は結果に関わらず、再利用を止めない。
+C# の検査は、依存 source の親 directory にある MSBuild の設定（`Directory.Build.props`、`Directory.Build.targets`、`global.json`）で再利用を止める。
+Rust の検査は、`$CARGO_HOME` の Cargo 設定（`config.toml`、`config`）で再利用を止める。Cargo の設定は C# の検査に関わらないため、その再利用を止めない。
 WebView の受入は、実行時に作る Xvfb・D-Bus と描画経路の状態を source の同一性で保証できないため、毎回実行する。
 証跡は同じ local 実行者の結果の再利用用であり、署名済みの CI attestation や第三者の結果の信頼検証ではない。
 

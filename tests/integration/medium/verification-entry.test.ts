@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { verificationEnvironment, probe } from "../../../scripts/verification/en
 import { dependencyFiles, digestFiles } from "../../../scripts/verification/inputs.ts";
 import { runCommand } from "../../../scripts/verification/process.ts";
 import { sourceClosure } from "../../../scripts/verification/source-inputs.ts";
+import { sandboxPrefix } from "../../../scripts/verification/sandbox.ts";
 import {
   attemptCheck,
   readReceipt,
@@ -54,6 +56,18 @@ test("Vitest module-cache outputs do not change installed dependency identity", 
   expect(changed).not.toBe(before);
   await writeFile(join(packageSource, "source.js"), "export const value = 2;");
   expect(digestFiles(dependencyFiles(modules))).not.toBe(changed);
+});
+
+test("a writable directory that appears inside the repository leaves the sandbox command unchanged", async () => {
+  const repository = realpathSync(process.cwd());
+  await mkdir(join(repository, "work"), { recursive: true });
+  const parent = await mkdtemp(join(repository, "work", "sandbox-probe-"));
+  onTestFinished(() => rm(parent, { recursive: true, force: true }));
+  const target = join(parent, "rust-target");
+  const env = { HOME: await sandbox(), RUST_CONTRACT_TARGET_DIR: target };
+  const before = sandboxPrefix("medium", env);
+  await mkdir(target);
+  expect(sandboxPrefix("medium", env)).toEqual(before);
 });
 
 test("a missing local source input fails instead of reusing earlier evidence", async () => {

@@ -13,6 +13,8 @@ import { outputTreeProps } from "./csharp-output-tree.js";
 
 /** Independent fixture directory shipped with the generator tests */
 const fixtureSource = fileURLToPath(new URL("../../fixtures/csharp/", import.meta.url));
+/** The only NuGet configuration of the offline restore, so that a user or ancestor configuration cannot change what it resolves */
+const offlineRestoreConfig = join(fixtureSource, "offline.nuget.config");
 /** Minimum .NET SDK major version required by the generated C# 14 projects */
 const requiredDotnetMajor = 10;
 /** Generous process ceiling for a real native process on a shared workstation */
@@ -205,7 +207,11 @@ export function buildCSharpProject(
     "-nologo",
     "-v:minimal",
   ];
-  const restore = runDotnet(fixture, ["restore", ...shared, "-p:NuGetAudit=false"], without);
+  const restore = runDotnet(
+    fixture,
+    ["restore", ...shared, "--configfile", offlineRestoreConfig, "-p:NuGetAudit=false"],
+    without,
+  );
   if (restore.status !== 0) return restore;
   requireAuditedPackages(fixture.artifactsRoot);
   const build = runDotnet(fixture, ["build", ...shared, "--no-restore"], without);

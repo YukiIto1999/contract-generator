@@ -16,13 +16,8 @@ export const commitChecks: readonly Check[] = [
 ];
 /** Native acceptance collections without duplicate commit checks */
 export const nativeChecks: readonly Suite[] = ["typescript", "csharp", "rust", "tauri"];
-/** MSBuild and NuGet files that an ancestor directory can contribute to a copied project */
-const inheritedNativeFiles = [
-  "Directory.Build.props",
-  "Directory.Build.targets",
-  "NuGet.Config",
-  "global.json",
-];
+/** MSBuild files that an ancestor directory can contribute to a copied project; NuGet configuration is not one, because the restore reads only the repository's offline configuration */
+const inheritedNativeFiles = ["Directory.Build.props", "Directory.Build.targets", "global.json"];
 
 /** Native collection corresponding to a test check
  * @param check - Required check
@@ -58,27 +53,17 @@ export function outputIdentity(check: Check): string | null {
 /** Existence test of a configuration path, replaceable where no real filesystem is readable */
 type Present = (path: string) => boolean;
 
-/** User-owned tool configuration of one native collection whose contents may hold credentials
- * @param check - Native collection whose tool reads the configuration
+/** User-owned Cargo configuration whose contents may hold credentials
  * @param env - Actual native execution environment
  * @param present - Existence test of a configuration path
  * @returns Present configuration paths that are not fingerprinted
  */
-function privateConfigurations(
-  check: "csharp" | "rust",
-  env: NodeJS.ProcessEnv,
-  present: Present,
-): string[] {
-  const home = env.HOME ?? "";
-  const cargo = env.CARGO_HOME ?? join(home, ".cargo");
-  const paths =
-    check === "csharp"
-      ? [join(home, ".nuget/NuGet/NuGet.Config"), join(home, ".config/NuGet/NuGet.Config")]
-      : [join(cargo, "config.toml"), join(cargo, "config")];
-  return paths.filter((path) => present(path));
+function cargoConfigurations(env: NodeJS.ProcessEnv, present: Present): string[] {
+  const cargo = env.CARGO_HOME ?? join(env.HOME ?? "", ".cargo");
+  return [join(cargo, "config.toml"), join(cargo, "config")].filter((path) => present(path));
 }
 
-/** Ancestor MSBuild or NuGet configuration outside the copied dependency sources
+/** Ancestor MSBuild configuration outside the copied dependency sources
  * @param env - Actual native execution environment
  * @param present - Existence test of a configuration path
  * @returns Present inherited configuration paths
@@ -110,10 +95,8 @@ export function reuseBlocker(
 ): string | undefined {
   if (check === "tauri") return "live display and D-Bus state require a fresh acceptance scenario";
   if (check !== "csharp" && check !== "rust") return undefined;
-  const unresolved = [
-    ...privateConfigurations(check, env, present),
-    ...(check === "csharp" ? inheritedConfigurations(env, present) : []),
-  ];
+  const unresolved =
+    check === "rust" ? cargoConfigurations(env, present) : inheritedConfigurations(env, present);
   return unresolved.length === 0
     ? undefined
     : `unresolved native tool configuration: ${unresolved.join(", ")}`;

@@ -68,7 +68,7 @@ const machine = {
   HOME: "/home/user",
   TypeModelingProjectPath: "/work/typemodeling/src/TypeModeling/TypeModeling.csproj",
 };
-/** NuGet configuration files that a native restore reads outside the checkout */
+/** NuGet configuration files outside the checkout that the restore ignores because it reads only the repository's offline configuration */
 const nugetFiles = [
   "/home/user/.nuget/NuGet/NuGet.Config",
   "/home/user/.config/NuGet/NuGet.Config",
@@ -77,8 +77,17 @@ const nugetFiles = [
 /** Cargo configuration files that a native build reads outside the checkout */
 const cargoFiles = ["/home/user/.cargo/config.toml", "/home/user/.cargo/config"];
 
-test.each(nugetFiles)("the NuGet configuration %s stops reuse of the csharp collection", (file) => {
-  expect(reuseBlocker("csharp", machine, holding(file))).toContain(file);
+test.each(nugetFiles)(
+  "the NuGet configuration %s does not stop reuse of the csharp collection",
+  (file) => {
+    expect(reuseBlocker("csharp", machine, holding(file))).toBeUndefined();
+  },
+);
+
+test("an MSBuild file above the C# dependency stops reuse of the csharp collection", () => {
+  expect(reuseBlocker("csharp", machine, holding("/work/Directory.Build.props"))).toContain(
+    "/work/Directory.Build.props",
+  );
 });
 
 test.each(cargoFiles)("the Cargo configuration %s stops reuse of the rust collection", (file) => {
