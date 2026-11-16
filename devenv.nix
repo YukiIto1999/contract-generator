@@ -40,18 +40,4 @@
     RUST_CONTRACT_TARGET_DIR = "${config.devenv.root}/work/rust-target";
   };
 
-  # The environment's verification gate calls `devenv shell -- verify`; the npm script stays the single definition of the checks.
-  scripts.verify.exec = ''
-    set -euo pipefail
-
-    npm run verify
-  '';
-
-  # The pre-push hook calls `devenv shell -- verify-push`; the npm script stays the single definition of the checks.
-  scripts.verify-push.exec = ''
-    set -euo pipefail
-
-    npm run verify:push
-  '';
-
 }

@@ -68,8 +68,8 @@ TypeSpec の decorator を解釈するのは `src/profile/` だけであり、�
 
 検証は、`devenv shell` の中で、リポジトリの root にある package scripts を入口にする。
 作業単位の確定前には T1 を、push と release の前には T2 を使う。
-環境の T1 の門と pre-push hook は、devenv の `scripts.verify` と `scripts.verify-push` を通じて、同じ入口を `devenv shell -- verify` と `devenv shell -- verify-push` で呼ぶ。
-この二つの script は package scripts を呼ぶだけであり、検査の定義は package scripts だけに置く。
+環境の T1 の門と pre-push hook は、`devenv.nix` を持つリポジトリの package scripts を devenv の中で呼ぶため、同じ入口を `devenv shell -- npm run verify` と `devenv shell -- npm run verify:push` で呼ぶ。
+検査の定義は package scripts だけに置く。
 
 | 段                 | 入口                  | 確認する保証                                                                                                                                                              |
 | ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,7 +79,7 @@ TypeSpec の decorator を解釈するのは `src/profile/` だけであり、�
 
 T2 は T1 や全 test の入口を再帰的に呼ばず、検査ごとに証跡を照合する。
 独立した継続評価の workload は採用していないため、同じ全 test を再実行するだけの T3 と `verify:full` は定義しない。
-pre-push hook は `devenv shell -- verify-push` を通じて T2 を呼び、CI から呼ぶ場合も devenv の中で `npm run verify:push` を使い、その環境に必要な受入の証跡がなければ実行する。
+pre-push hook は `devenv shell -- npm run verify:push` で T2 を呼び、CI から呼ぶ場合も devenv の中で `npm run verify:push` を使い、その環境に必要な受入の証跡がなければ実行する。
 このリポジトリは Git の global hook 設定を変更しない。
 
 ### 選択と失敗
