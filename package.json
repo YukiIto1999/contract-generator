@@ -28,6 +28,7 @@
     "test": "node scripts/verification/run.ts test",
     "verify": "node scripts/verification/run.ts verify",
     "verify:push": "node scripts/verification/run.ts verify:push",
+    "verify:summary": "node scripts/verification/summarize.ts",
     "prepare:native": "node scripts/prepare-native-fixtures.ts",
     "audit:native": "node scripts/audit-native-packages.ts"
   },

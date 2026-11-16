@@ -211,6 +211,15 @@ README は英語版を正本とし、日本語版を同じ変更で正本に合�
 1. `develop` の `devenv shell` で、外部へ接続できる状態で `npm run audit:native && npm run verify:push` を実行し、再監査と全ての受入の成立を確かめる。
 2. `CHANGELOG.md` に、セマンティックバージョニングに従う該当バージョンの節を追記する。
 3. `chore: X.Y.Z のリリース準備` でコミットし、`develop` へマージする。
-4. `main` を該当コミットへ進め、`vX.Y.Z` タグを付ける。
+4. `main` を該当コミットへ進め、そのコミットで `npm run verify:push` を実行し直す。
+5. `npm run --silent verify:summary` の出力を file に書き、`git tag -a vX.Y.Z -F <file>` で、その要約を本文にした annotated tag を付ける。
+
+要約は、`work/verification/` に残る `verify:push` の成功の証跡から作り、新しい証跡は作らない。
+内容は、tag が指す commit、toolchain（Node、.NET SDK、rustc、cargo、GTK・WebKitGTK・libsoup の版）、build・型検査・check の成功と、collection ごとの passed の test の件数と module の数である。
+手順 4 の `verify:push` が、証跡を tag が指す commit の入力へ照合し直す。
+CHANGELOG だけが変わった場合に実行し直すのは `check` だけであり、native の証跡は再利用される。
+証跡が欠けているか失敗している場合と、checkout に未 commit の変更がある場合は、何も出力せずに失敗する。
+要約も同じ local 実行者の記録であり、署名済みの attestation や第三者の検証ではない。
 
 registry へは配布せず、利用側は checkout したリポジトリのリリースタグを参照する。
+利用側は `git tag -n99 vX.Y.Z` でその版の要約を読み、取り込んだ commit が tag の指す commit と一致することを確かめる。
