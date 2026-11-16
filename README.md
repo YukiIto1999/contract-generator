@@ -200,13 +200,30 @@ The generator also uses RE2JS for pattern preflight and constant validation; `@e
 
 ### C#
 
-The generated projects require [TypeModeling `v0.3.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.3.0) and [EffectSystem `v0.3.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.3.0).
+The generated projects require [TypeModeling `v0.4.0`](https://github.com/YukiIto1999/typemodeling-dotnet/tree/v0.4.0) and [EffectSystem `v0.4.0`](https://github.com/YukiIto1999/effectsystem-dotnet/tree/v0.4.0).
 Place the source checkouts side by side as `typemodeling-dotnet/` and `effectsystem-dotnet/`.
-Pass the absolute project paths as the MSBuild properties `TypeModelingProjectPath` and `EffectSystemProjectPath`, using command-line global properties or environment variables.
-A property set only in the consuming `.csproj` is not forwarded to referenced projects; a shared `Directory.Build.props` is another option only if it also covers the generated projects.
-All three generated projects import `csharp/Contract.Analysis.props`, which attaches the existing `TypeModeling.Analyzers` project and makes exhaustiveness diagnostics errors without adding analyzer assemblies as runtime dependencies.
-MSBuild does not propagate analyzer references or warning policies through a project reference, so every consumer project must import the same generated file.
-Inside the consuming SDK project, set `GeneratedContractRoot` to the generated output directory relative to that project, and add:
+Write the absolute project paths once, as the MSBuild properties `TypeModelingProjectPath` and `EffectSystemProjectPath`, in the consuming repository's `Directory.Build.props`.
+MSBuild imports the first `Directory.Build.props` that it finds when it walks up from each project's directory, so every project in that tree receives the same settings.
+A property set only in the consuming `.csproj` is not forwarded to referenced projects.
+The generated projects are ordinary projects of the consumer: they declare no analyzer reference and import no props of their own.
+Every C# project below that `Directory.Build.props`, generated or hand-written, receives its analyzers from the props that the file imports, so write the import once in the `Directory.Build.props` at the root of the consuming repository and in no project.
+`csharp/Contract.Analysis.props` imports `TypeModeling.Analysis.props` from the TypeModeling checkout that `TypeModelingProjectPath` names, which attaches `TypeModeling.Analyzers` to every C# project without adding analyzer assemblies as runtime dependencies.
+It adds only what belongs to the generated contract: `CS8509`, `CS8524`, `CS8655`, `CS8846`, `CS8847` and `TYPMOD021` are errors, and a generated global analyzer configuration enables `TYPMOD021`.
+Replace `/absolute/path` with the directory containing the two source checkouts, and `generated` with the generated output directory:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <TypeModelingProjectPath>/absolute/path/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj</TypeModelingProjectPath>
+    <EffectSystemProjectPath>/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj</EffectSystemProjectPath>
+    <GeneratedContractRoot>$(MSBuildThisFileDirectory)generated</GeneratedContractRoot>
+  </PropertyGroup>
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
+  <Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" />
+</Project>
+```
+
+A consuming `.csproj` has no import and only references the generated project:
 
 ```xml
 <ItemGroup>
@@ -214,19 +231,20 @@ Inside the consuming SDK project, set `GeneratedContractRoot` to the generated o
 </ItemGroup>
 ```
 
-Build from the consumer project's directory, replacing `/absolute/path` with the directory containing the two source checkouts:
-
-```sh
-dotnet build Consumer.csproj \
-  -p:TypeModelingProjectPath=/absolute/path/typemodeling-dotnet/src/TypeModeling/TypeModeling.csproj \
-  -p:EffectSystemProjectPath=/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj
-```
+`dotnet build` needs no properties.
+Because `Directory.Build.props` imports files from the generated output, generate before you build.
+When the generated output sits below the directory of `Directory.Build.props`, the generated projects receive the same settings.
+A generated project imports nothing itself, so output outside that tree builds only when its dependency paths come from environment variables or `dotnet build -p:` properties, and nothing analyzes it: it receives neither the analyzers nor the error policy.
+Without the TypeModeling analyzer the compiler reports `CS8509` for the generated switches over closed types, so that build prints those warnings and fails under `TreatWarningsAsErrors`.
+To analyze it, put a `Directory.Build.props` above the generated directory that imports the same two files as the example above, because the generated projects do not receive the consumer's `Directory.Build.props` there.
+When `Directory.Build.props` exists at several levels, MSBuild uses only the nearest one; to keep the settings above it, begin the nearer file with `<Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />`.
 
 A consumer of only the types unit can omit `EffectSystemProjectPath` and the `Contract.EffectAnalysis.props` import.
-The generated provider and client also import `csharp/Contract.EffectAnalysis.props`, which attaches `EffectSystem.Analyzers` and makes its usage diagnostics errors.
+`csharp/Contract.EffectAnalysis.props` imports `EffectSystem.Analysis.props` from the EffectSystem checkout that `EffectSystemProjectPath` names, which attaches `EffectSystem.Analyzers`, and it makes `EFFSYS001` to `EFFSYS015` errors.
 A consumer that uses `Effect` keeps that import after `Contract.Analysis.props`, as in the example.
-Both imports keep analyzer assemblies out of runtime dependencies.
-The shared import rejects a missing analyzer project rather than silently omitting the check.
+Both generated files import an owner's props only when nothing imported it before, so a `Directory.Build.props` that already imports `TypeModeling.Analysis.props` or `EffectSystem.Analysis.props` keeps a single attachment of each analyzer.
+A missing or stopped analyzer fails the build with the owners' diagnostics (`TYPMOD201` to `TYPMOD203`, `TYPMOD022`, `EFFSYS201`, `EFFSYS202`, `EFFSYS016`), and a checkout without the props at its root fails it with an error that names the project-path property.
+To fail a solution build for a project that these imports did not reach, add the `Directory.Solution.targets` that the owners' READMEs describe.
 Generated switches over closed types enumerate every variant without a default or discard arm.
 The generated global analyzer configuration enables `TYPMOD021`, which rejects explicit catchall arms over closed types. Consumers import this configuration through `Contract.Analysis.props`, so adding a future variant requires an explicit consumer case.
 Effect-building methods take no deadline argument. The composition root supplies a clock, deadline diagnostics, an absolute `Deadline`, and the deadline-failure factory to `EffectRuntime`; native effects receive that same deadline through `Try`. IPC transports accept `Deadline` with the cancellation token last, and HTTP transports read `HttpRequestOptionsKey<Deadline>` through `ContractClient.DeadlineOption`.
@@ -296,21 +314,6 @@ This guarantee starts at the generator-owned profile/execution boundary.
 Before the emitter's preflight, TypeSpec 1.17.0's `@pattern` decorator constructs native `RegExp(pattern)` to check syntax and stores the original source; that decorator does not perform matching.
 Replacing generator-owned matching therefore does not remove frontend native regex parsing or establish an end-to-end resource bound for arbitrary hostile compiler input.
 
-After checking a value's kind, applicable codepoint-length and UUID checks may suppress the pattern check for that same value.
-Their violations remain, and siblings and independent fields continue to be checked; not every failing rule on one value is promised a separate violation.
-An executed pattern mismatch remains a `format` violation.
-Pattern validation uses the common result algebra: success carries the accepted value and unknown-member diagnostics; failure retains violations and already collected diagnostics without a partially accepted value.
-
-The internal model and JSON Schema/OpenAPI projections retain the original ECMAScript source, not the translated RE2JS expression.
-External schema validators own their execution safety; the generated runtime's guarantee does not transfer to them.
-Verify browser and Tauri compatibility in the target environment with the generated consumer and its required dependencies installed.
-
-The IPC binding is a request and a response over a transport that the host supplies.
-Its fixtures include generic separate-process transports and a [real Tauri/Wry webview](./tests/fixtures/tauri/README.md) with generated TypeScript consumers and Rust provider dispatch.
-That desktop fixture targets Linux with GTK3 and WebKitGTK 4.1; it is not a claim of acceptance on Windows, macOS, or mobile.
-
-## Verification
-
 Generated C# matches the original string with a `RegexOptions.NonBacktracking` `Regex`, built once per distinct pattern source in a static field of `Wire`.
 Matching is a partial `IsMatch`, and `^` and `$` translate to `\A` and `\z`, so `^a$` does not match `"a\n"`.
 Direct C# rendering also rejects a pattern that fails the common profile, as `unsupported-csharp`.
@@ -331,6 +334,21 @@ A character set that includes supplementary planes counts 1 for its BMP part, if
 Therefore `^.{666}$` and `^[a-z]{1000}$` are accepted, while `^.{667}$` and `^(?:ab){1000}$` are rejected.
 .NET can shrink the estimate by merging alternatives, so some rejected expressions could still be built by .NET itself.
 A host that lowers the AppContext value `REGEX_NONBACKTRACKING_MAX_AUTOMATA_SIZE` below 10000 can make the construction of an accepted expression fail, so it must not.
+
+After checking a value's kind, applicable codepoint-length and UUID checks may suppress the pattern check for that same value.
+Their violations remain, and siblings and independent fields continue to be checked; not every failing rule on one value is promised a separate violation.
+An executed pattern mismatch remains a `format` violation.
+Pattern validation uses the common result algebra: success carries the accepted value and unknown-member diagnostics; failure retains violations and already collected diagnostics without a partially accepted value.
+
+The internal model and JSON Schema/OpenAPI projections retain the original ECMAScript source, not the translated RE2JS expression.
+External schema validators own their execution safety; the generated runtime's guarantee does not transfer to them.
+Verify browser and Tauri compatibility in the target environment with the generated consumer and its required dependencies installed.
+
+The IPC binding is a request and a response over a transport that the host supplies.
+Its fixtures include generic separate-process transports and a [real Tauri/Wry webview](./tests/fixtures/tauri/README.md) with generated TypeScript consumers and Rust provider dispatch.
+That desktop fixture targets Linux with GTK3 and WebKitGTK 4.1; it is not a claim of acceptance on Windows, macOS, or mobile.
+
+## Verification
 
 From the repository root, `npm run verify` checks a commit-sized unit: build, types, format and lint, module boundaries, Small tests, and local compiler and publication acceptance.
 Before pushing or preparing a release, run `npm run verify:push` in the prepared development environment.

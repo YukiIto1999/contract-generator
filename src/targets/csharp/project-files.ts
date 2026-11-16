@@ -11,22 +11,24 @@ function references(unit: Unit): string {
     : '<ProjectReference Include="../types/Contract.Types.csproj" />\n    <ProjectReference Include="$(EffectSystemProjectPath)" />';
 }
 
-/** Shared build-time enforcement for generated projects and their consumers
- * @returns Importable analyzer attachment and exhaustiveness error policy
+/** Contract-specific build policy for the consumer's `Directory.Build.props`, on top of the TypeModeling props
+ *
+ * The analyzer attachment belongs to `TypeModeling.Analysis.props` of the checkout that `TypeModelingProjectPath` names.
+ * An earlier import of that file is left alone, so the analyzer is attached once.
+ * @returns Importable error policy, analyzer configuration and import of the owner's props
  */
 export function analysisProps(): string {
   return `<Project>
   <PropertyGroup>
     <WarningsAsErrors>$(WarningsAsErrors);CS8509;CS8524;CS8655;CS8846;CS8847;TYPMOD021</WarningsAsErrors>
-    <_TypeModelingProjectDirectory Condition="'$(TypeModelingProjectPath)' != ''">$([System.IO.Path]::GetDirectoryName($([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(TypeModelingProjectPath)'))))</_TypeModelingProjectDirectory>
+    <_ContractTypeModelingRoot Condition="'$(TypeModelingProjectPath)' != ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(TypeModelingProjectPath)', '..', '..', '..'))</_ContractTypeModelingRoot>
   </PropertyGroup>
   <ItemGroup>
     <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory)Contract.Analysis.globalconfig" />
-    <ProjectReference Include="$(_TypeModelingProjectDirectory)/../TypeModeling.Analyzers/TypeModeling.Analyzers.csproj" Condition="'$(TypeModelingProjectPath)' != ''" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
+  <Import Project="$(_ContractTypeModelingRoot)TypeModeling.Analysis.props" Condition="'$(TypeModelingAnalyzerProject)' == '' And '$(_ContractTypeModelingRoot)' != '' And Exists('$(_ContractTypeModelingRoot)TypeModeling.Analysis.props')" />
   <Target Name="RequireContractAnalysis" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(TypeModelingProjectPath)' == ''" Text="Supply TypeModelingProjectPath for the TypeModeling source and its analyzer" />
-    <Error Condition="'$(TypeModelingProjectPath)' != '' And !Exists('$(_TypeModelingProjectDirectory)/../TypeModeling.Analyzers/TypeModeling.Analyzers.csproj')" Text="TypeModeling.Analyzers must be present beside the TypeModeling source project" />
+    <Error Condition="'$(TypeModelingAnalyzerProject)' == ''" Text="TypeModeling.Analysis.props was not imported; set TypeModelingProjectPath to src/TypeModeling/TypeModeling.csproj of a TypeModeling v0.4.0 or later checkout" />
   </Target>
 </Project>
 `;
@@ -41,31 +43,35 @@ dotnet_diagnostic.TYPMOD021.severity = error
 `;
 }
 
-/** Additional build-time enforcement for projects that use Effect
- * @returns Importable effect analyzer attachment and error policy
+/** Contract-specific build policy for projects that use Effect, on top of the EffectSystem props
+ *
+ * The analyzer attachment belongs to `EffectSystem.Analysis.props` of the checkout that `EffectSystemProjectPath` names.
+ * An earlier import of that file is left alone, so the analyzer is attached once.
+ * @returns Importable error policy and import of the owner's props
  */
 export function effectAnalysisProps(): string {
   return `<Project>
   <PropertyGroup>
     <WarningsAsErrors>$(WarningsAsErrors);EFFSYS001;EFFSYS002;EFFSYS003;EFFSYS004;EFFSYS005;EFFSYS006;EFFSYS007;EFFSYS008;EFFSYS009;EFFSYS010;EFFSYS011;EFFSYS012;EFFSYS013;EFFSYS014;EFFSYS015</WarningsAsErrors>
-    <_EffectSystemProjectDirectory Condition="'$(EffectSystemProjectPath)' != ''">$([System.IO.Path]::GetDirectoryName($([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(EffectSystemProjectPath)'))))</_EffectSystemProjectDirectory>
+    <_ContractEffectSystemRoot Condition="'$(EffectSystemProjectPath)' != ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(EffectSystemProjectPath)', '..', '..', '..'))</_ContractEffectSystemRoot>
   </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="$(_EffectSystemProjectDirectory)/../EffectSystem.Analyzers/EffectSystem.Analyzers.csproj" Condition="'$(EffectSystemProjectPath)' != ''" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
-  </ItemGroup>
+  <Import Project="$(_ContractEffectSystemRoot)EffectSystem.Analysis.props" Condition="'$(EffectSystemAnalyzerProject)' == '' And '$(_ContractEffectSystemRoot)' != '' And Exists('$(_ContractEffectSystemRoot)EffectSystem.Analysis.props')" />
   <Target Name="RequireContractEffectAnalysis" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(EffectSystemProjectPath)' == ''" Text="Supply EffectSystemProjectPath for the EffectSystem source and its analyzer" />
-    <Error Condition="'$(EffectSystemProjectPath)' != '' And !Exists('$(_EffectSystemProjectDirectory)/../EffectSystem.Analyzers/EffectSystem.Analyzers.csproj')" Text="EffectSystem.Analyzers must be present beside the EffectSystem source project" />
+    <Error Condition="'$(EffectSystemAnalyzerProject)' == ''" Text="EffectSystem.Analysis.props was not imported; set EffectSystemProjectPath to src/EffectSystem/EffectSystem.csproj of an EffectSystem v0.4.0 or later checkout" />
   </Target>
 </Project>
 `;
 }
 
 /** Generated dependency-unit project
+ *
+ * A unit is an ordinary project of the consumer: it declares no analyzer reference and imports no props.
+ * The analyzers, the error policy and the dependency paths reach it from the `Directory.Build.props` above it.
  * @param unit - Dependency role
  * @returns Deterministic caller-configured project file
  */
 export function project(unit: Unit): string {
+  const dependency = unit === "Types" ? "TypeModelingProjectPath" : "EffectSystemProjectPath";
   return `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -76,10 +82,12 @@ export function project(unit: Unit): string {
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>Contract.${unit}</AssemblyName>
   </PropertyGroup>
-  <Import Project="../Contract.Analysis.props" />${unit === "Types" ? "" : '\n  <Import Project="../Contract.EffectAnalysis.props" />'}
   <ItemGroup>
     ${references(unit)}
   </ItemGroup>
+  <Target Name="RequireContractDependency" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(${dependency})' == ''" Text="Supply ${dependency} for the ${dependency.replace("ProjectPath", "")} source project" />
+  </Target>
 </Project>
 `;
 }
