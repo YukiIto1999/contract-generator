@@ -107,11 +107,13 @@ internal static partial class Wire
     /// <param name="minimum">Minimum code point count, if restricted</param>
     /// <param name="maximum">Maximum code point count, if restricted</param>
     /// <param name="uuid">Whether the text must spell a UUID</param>
+    /// <param name="pattern">Linear-time matcher of the declared pattern, which only a text that passed the other checks must satisfy; null without a pattern</param>
     /// <param name="c">Violation accumulator of the current boundary</param>
     /// <param name="path">Pointer of the text</param>
-    internal static void Text(string? value, int? minimum, int? maximum, bool uuid, ReadContext c, Wire.Path path)
+    internal static void Text(string? value, int? minimum, int? maximum, bool uuid, Regex? pattern, ReadContext c, Wire.Path path)
     {
         if (value is null) { c.Add(path, "null"); return; }
+        int before = c.ViolationCount;
         int count = 0;
         var span = value.AsSpan();
         while (!span.IsEmpty)
@@ -122,6 +124,7 @@ internal static partial class Wire
         if (minimum is int min && count < min) c.Add(path, "minLength");
         if (maximum is int max && count > max) c.Add(path, "maxLength");
         if (uuid && (value.Length != 36 || !Guid.TryParseExact(value, "D", out _))) c.Add(path, "format");
+        if (pattern is not null && c.ViolationCount == before && !pattern.IsMatch(value)) c.Add(path, "format");
     }
     /// <summary>Exact range validation</summary>
     /// <param name="text">Validated numeric token</param>

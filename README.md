@@ -209,10 +209,6 @@ MSBuild does not propagate analyzer references or warning policies through a pro
 Inside the consuming SDK project, set `GeneratedContractRoot` to the generated output directory relative to that project, and add:
 
 ```xml
-<PropertyGroup>
-  <GeneratedContractRoot>../generated</GeneratedContractRoot>
-</PropertyGroup>
-<Import Project="$(GeneratedContractRoot)/csharp/Contract.Analysis.props" />
 <ItemGroup>
   <ProjectReference Include="$(GeneratedContractRoot)/csharp/types/Contract.Types.csproj" />
 </ItemGroup>
@@ -226,14 +222,9 @@ dotnet build Consumer.csproj \
   -p:EffectSystemProjectPath=/absolute/path/effectsystem-dotnet/src/EffectSystem/EffectSystem.csproj
 ```
 
-A consumer of only the types unit can omit `EffectSystemProjectPath`.
+A consumer of only the types unit can omit `EffectSystemProjectPath` and the `Contract.EffectAnalysis.props` import.
 The generated provider and client also import `csharp/Contract.EffectAnalysis.props`, which attaches `EffectSystem.Analyzers` and makes its usage diagnostics errors.
-Every consumer that uses `Effect` must add that import after `Contract.Analysis.props`:
-
-```xml
-<Import Project="$(GeneratedContractRoot)/csharp/Contract.EffectAnalysis.props" />
-```
-
+A consumer that uses `Effect` keeps that import after `Contract.Analysis.props`, as in the example.
 Both imports keep analyzer assemblies out of runtime dependencies.
 The shared import rejects a missing analyzer project rather than silently omitting the check.
 Generated switches over closed types enumerate every variant without a default or discard arm.
@@ -261,16 +252,17 @@ Without that switch, native builds allow newer compatible compilers.
 
 The emitter reports each of these at the declaration and generates nothing.
 
-| Limit                                                                                   | Affected                                                            |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `unixTimestamp` encoding                                                                | C#, Rust                                                            |
-| `@pattern` outside the safe common profile below                                        | All, including Rust-only generation                                 |
-| `@pattern` within that profile                                                          | C# remains unsupported; Rust also requires an equivalent in `regex` |
-| `@preserveLexical` on a boolean or bytes scalar                                         | Rust                                                                |
-| An HTTP method outside the nine standard methods                                        | Rust                                                                |
-| A nullable parameter placed in the path, the query, or a header                         | All                                                                 |
-| A nullable raw binary body                                                              | All                                                                 |
-| Two distinct numbers beyond the binary64 range referenced through a `const` or an alias | All, because TypeSpec 1.17 does not expose their source spelling    |
+| Limit                                                                                              | Affected                                                         |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `unixTimestamp` encoding                                                                           | C#, Rust                                                         |
+| `@pattern` outside the safe common profile below                                                   | All, including Rust-only generation                              |
+| `@pattern` within that profile                                                                     | Rust also requires an equivalent in `regex`                      |
+| `@pattern` within that profile whose estimated .NET non-backtracking automaton exceeds 10000 nodes | C#                                                               |
+| `@preserveLexical` on a boolean or bytes scalar                                                    | Rust                                                             |
+| An HTTP method outside the nine standard methods                                                   | Rust                                                             |
+| A nullable parameter placed in the path, the query, or a header                                    | All                                                              |
+| A nullable raw binary body                                                                         | All                                                              |
+| Two distinct numbers beyond the binary64 range referenced through a `const` or an alias            | All, because TypeSpec 1.17 does not expose their source spelling |
 
 A top-level bytes request body is sent as raw bytes.
 To send bytes as JSON, put a bytes field inside an object body, such as `model Upload { data: bytes; }`; the body is JSON and the field uses its declared wire encoding.
@@ -281,7 +273,7 @@ A nested number beyond the binary64 range inside `@providerDefault`, as in `#{n:
 
 `@pattern` is an optional capability with a closed subset of ECMAScript Unicode (`u`) semantics and no other flags.
 This restriction applies to the common authoring profile, not only to the TypeScript backend: a pattern that Rust could execute can still be rejected before Rust-only generation.
-C# continues to reject all patterns; Rust retains its additional target-specific restrictions.
+Rust and C# retain their additional target-specific restrictions.
 
 The profile admits Unicode scalar literals and escapes (including correctly paired surrogate escapes), concatenation, alternation including empty alternatives, ordinary/noncapturing/named groups, and greedy or lazy `?`, `*`, `+`, and counted quantifiers within the engine's compilation limits.
 Capture names and captures are erased because validation exposes only a boolean result.
@@ -318,6 +310,27 @@ Its fixtures include generic separate-process transports and a [real Tauri/Wry w
 That desktop fixture targets Linux with GTK3 and WebKitGTK 4.1; it is not a claim of acceptance on Windows, macOS, or mobile.
 
 ## Verification
+
+Generated C# matches the original string with a `RegexOptions.NonBacktracking` `Regex`, built once per distinct pattern source in a static field of `Wire`.
+Matching is a partial `IsMatch`, and `^` and `$` translate to `\A` and `\z`, so `^a$` does not match `"a\n"`.
+Direct C# rendering also rejects a pattern that fails the common profile, as `unsupported-csharp`.
+.NET reads UTF-16 code units, so the generator translates the pattern again from the shared syntax tree: literals and character sets become expressions in which supplementary planes are surrogate-pair alternatives.
+A pair is never split into two matches, and dot and complements read one code point at a time.
+A string with an unpaired surrogate is rejected as a `format` violation by the code-point check that runs before the pattern, so no expression reads an unpaired surrogate.
+Lazy markers do not change a boolean result and are dropped.
+A group with an empty alternative is written as an optional group of the other alternatives, because .NET's tree reduction otherwise drops the lower bound of `(?:a+|)+` and rejects empty input.
+Authored patterns are never run by a backtracking engine, and there is no fallback to one.
+For a fixed admitted pattern, this removes catastrophic backtracking, but does **not** bound total work across arbitrarily large input, many fields, or many patterns.
+
+Before it builds a non-backtracking matcher, .NET estimates the size of its automaton and throws `NotSupportedException` above its default limit of 10000 nodes.
+The generator computes an upper bound of the same estimate and rejects a larger expression at its declaration as `unsupported-csharp`, for C# generation only.
+The estimate is the number of literals and character sets after counted repetitions are written out, plus one, multiplied by five when the expression contains `^` or `$`.
+A BMP literal and a character set without supplementary planes count as 1, and a supplementary literal counts as 2.
+A character set that includes supplementary planes counts 1 for its BMP part, if any, and 2 for each surrogate-pair alternative, so dot counts as 3.
+`?` and `*` count their body once, `+` twice, `{n}` and `{m,n}` n times, and `{m,}` m + 1 times.
+Therefore `^.{666}$` and `^[a-z]{1000}$` are accepted, while `^.{667}$` and `^(?:ab){1000}$` are rejected.
+.NET can shrink the estimate by merging alternatives, so some rejected expressions could still be built by .NET itself.
+A host that lowers the AppContext value `REGEX_NONBACKTRACKING_MAX_AUTOMATA_SIZE` below 10000 can make the construction of an accepted expression fail, so it must not.
 
 From the repository root, `npm run verify` checks a commit-sized unit: build, types, format and lint, module boundaries, Small tests, and local compiler and publication acceptance.
 Before pushing or preparing a release, run `npm run verify:push` in the prepared development environment.

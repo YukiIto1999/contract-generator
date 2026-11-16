@@ -11,6 +11,7 @@ import { CSharpContext } from "./context.js";
 import { collectIssues } from "./issues.js";
 import { lines, name } from "./naming.js";
 import { renderOperationTypes } from "./outcomes.js";
+import { renderPatterns } from "./patterns.js";
 import { analysisConfig, analysisProps, effectAnalysisProps, project } from "./project-files.js";
 import { acceptanceNodes } from "./provider-default-plan.js";
 import { renderProviderDefaults } from "./provider-defaults.js";
@@ -55,6 +56,7 @@ function typesSource(c: CSharpContext, namespace: string): string {
     header(),
     `namespace ${namespace};`,
     runtime,
+    renderPatterns(c),
     ...c.model.types.map((node) => renderType(c, node, needs)),
     renderProviderDefaults(c, needs),
     renderAcceptance(c, needs),

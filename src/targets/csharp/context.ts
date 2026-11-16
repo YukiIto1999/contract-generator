@@ -9,6 +9,7 @@ import type {
 } from "../../model/contract-model.js";
 import { compareText } from "../../model/ordering.js";
 import { name, pascal, quote } from "./naming.js";
+import { patternSources } from "./patterns.js";
 
 /** Scalar meanings that a lexical-preserving declaration stores as an exact decimal token */
 const lexicalNumeric: Readonly<Record<string, true>> = {
@@ -40,6 +41,8 @@ export class CSharpContext {
   readonly model: ContractModel;
   /** Escaped generated contract namespace */
   readonly namespace: string;
+  /** Name of the shared matcher of each distinct pattern source */
+  readonly patternNames: ReadonlyMap<string, string>;
 
   /** Context construction
    * @param model - Normalized contract
@@ -56,6 +59,12 @@ export class CSharpContext {
       .split(".")
       .map((segment) => name(segment))
       .join(".");
+    this.patternNames = new Map(
+      patternSources(this.model).map((source, index): [string, string] => [
+        source,
+        `DeclaredPattern${index}`,
+      ]),
+    );
   }
 
   /** Nested-name-safe generated declaration reference

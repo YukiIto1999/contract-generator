@@ -203,6 +203,13 @@ Every level must hold the default, both references must be one accepted instance
 The driver gives the acceptance a five-second wall-clock allowance and reports `completed: false` instead of waiting, because a child that is unfolded once per path does not finish.
 The last test removes the case label or switch arm of `Tagged.Plain`, one variant of a closed union, from the generated provider-default region of the types source and builds the driver again. The actual compiler must reject it with exactly one error, `CS8509`; the source is restored afterward.
 
+## Pattern boundaries
+
+`csharp-patterns.test.ts` generates one text scalar per pattern of the shared semantic vector (`src/model/patterns/semantic-vectors.fixture.ts`), of its UTF-16 edge cases and of its adversarial cases, and `PatternDriver.cs` finds each generated codec by its name.
+The driver sends every string through `Decode` and through `Create` and reports acceptance and violations, so an expectation is the vector's membership and never a value that the generator computed.
+A request may carry its text as UTF-16 code units, because JSON text cannot carry an unpaired surrogate.
+Two further scalars observe that a value which broke its length skips its pattern, and an object observes that a failing field does not stop the pattern check of its sibling.
+
 ## Not exercised
 
 - A native Tauri application or UI; IPC is the generic injected transport over a child process.

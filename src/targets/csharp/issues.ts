@@ -11,11 +11,8 @@ import { CSharpContext } from "./context.js";
 import { inputOf } from "./acceptance.js";
 import { binaryBody, requestShape } from "./http-request-codec.js";
 import { isJsonMediaType, name, pascal } from "./naming.js";
+import { patternReason } from "./patterns.js";
 import { reservedNames } from "./reserved-names.js";
-
-/** Reason shared by every unsupported ECMAScript pattern */
-const patternReason =
-  "ECMAScript regular-expression semantics require an explicit portable-pattern profile before C# emission";
 
 /** Mixed-enumeration case identifiers that nest inside the generated hierarchy */
 const mixedCaseNames: readonly string[] = ["Text", "Number", "Flag", "Null"];
@@ -102,7 +99,8 @@ function supportedEncoding(scalar: ScalarKind, encoding: Encoding): boolean {
  * @param subject - Contract member that holds the use
  */
 function inspectUse(c: CSharpContext, collector: Collector, use: TypeUse, subject: string): void {
-  if (use.constraints.pattern !== undefined) collector.add(use.origin, subject, patternReason);
+  const patternFailure = patternReason(c, use.id, use.constraints.pattern);
+  if (patternFailure !== undefined) collector.add(use.origin, subject, patternFailure);
   const node = c.nodes.get(use.id);
   for (const binding of ["http", "ipc"] as const) {
     const encoding = use.encodings?.[binding];
@@ -124,14 +122,16 @@ function inspectUse(c: CSharpContext, collector: Collector, use: TypeUse, subjec
  * @param node - Resolved declaration
  */
 function inspectNode(c: CSharpContext, collector: Collector, node: ContractType): void {
+  if (node.kind === "scalar" || node.kind === "array") {
+    const patternFailure = patternReason(c, node.id, node.constraints.pattern);
+    if (patternFailure !== undefined) collector.add(node.origin, node.id, patternFailure);
+  }
   switch (node.kind) {
     case "object":
       for (const field of node.fields)
         inspectUse(c, collector, field.type, `${node.id}.${field.name}`);
       break;
     case "array":
-      if (node.constraints.pattern !== undefined)
-        collector.add(node.origin, node.id, patternReason);
       inspectUse(c, collector, node.element, `${node.id}[]`);
       break;
     case "union":
@@ -155,7 +155,6 @@ function inspectScalar(
   collector: Collector,
   node: Extract<ContractType, { kind: "scalar" }>,
 ): void {
-  if (node.constraints.pattern !== undefined) collector.add(node.origin, node.id, patternReason);
   if (node.scalar === "bytes" && node.preserveLexical)
     collector.add(
       node.origin,

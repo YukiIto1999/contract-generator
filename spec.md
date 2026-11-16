@@ -73,7 +73,7 @@ TypeScriptの明示的なundefinedを欠落として受理しない。
 
 `@pattern`の共通profileは、ECMAScript Unicode (`u`)・他のflagなしの意味を厳密に保てる閉じた部分集合とする。
 この共通profileは、Rustだけを選択する場合にも適用する。
-C#のpattern未対応は変えず、Rustは共通profileに加えて自身の`regex`への等価な変換を要求する。
+Rustは共通profileに加えて自身の`regex`への等価な変換を要求し、C#は共通profileに加えて.NETの非backtracking engineが構築できる大きさを要求する。
 
 受理する構文は次に限り、RE2JS 2.10.0でcompileできることも条件とする。
 
@@ -107,6 +107,19 @@ patternを含むTypeScript moduleだけがRE2JSをimportし、異なるsourceご
 hostのresource budgetやschedulingを代行せず、browser・Tauriでの実際の生成物の動作確認をengine選択だけから主張しない。
 利用applicationは`re2js`の`2.10.0`を直接の実行時依存として宣言し、生成器の推移的依存に頼らない。
 `regexpp`は生成器だけの依存であり、生成コードへ持ち込まない。
+
+C#の生成物は、異なるpattern sourceごとに`RegexOptions.NonBacktracking`の`Regex`を一度だけ構築し、元の文字列に`IsMatch`で部分一致を行う。
+契約に書かれたpatternをbacktrackingのengineで実行せず、そこへfallbackしない。
+.NETはUTF-16のcode unitを読むので、生成器は同じ構文木からliteralと文字集合を、補助面をsurrogate pairの選択肢で表す式へ翻訳する。
+pairを分割して一致させず、dotと補集合を一つのcode pointとして読む。
+対のないsurrogateは、pattern検査より前のcode point検査が`format`違反とするので、式はそれを読まない。
+先頭`^`と末尾`$`は`\A`と`\z`に翻訳し、lazyの印は真偽値の判定を変えないので省く。
+空の選択肢を持つgroupは、他の選択肢を省略可能にしたgroupで表す。.NETの木の簡約が`(?:a+|)+`の下限を落とすためである。
+.NETは構築の前にautomatonの大きさを見積もり、既定の上限10000を超える式を`NotSupportedException`で拒否する。
+生成器は同じ見積りの上界を求め、超える式をC#の生成だけで宣言位置付きに拒否し、native engineやbacktrackingのengineへfallbackしない。
+見積りは、counted repetitionを展開して数えたliteralと文字集合の数に1を足した値であり、`^`か`$`を含む式ではその5倍とする。
+固定した受理済みpatternの破局的なバックトラッキングを除くが、総作業量の上限は保証しない。
+hostがAppContextの`REGEX_NONBACKTRACKING_MAX_AUTOMATA_SIZE`を既定より小さくしないことを、受理済みpatternの構築の前提とする。
 
 値の種類の検証後、同じ値に適用するcode point長・UUIDの安価な検査が失敗した場合だけ、その値のpattern検査を省ける。
 先行する別fieldの違反でpatternを省かず、兄弟項目と独立したfieldの検証を続ける。
